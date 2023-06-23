@@ -27,31 +27,44 @@ LEVEL_VALUES = [
 ]
 
 
-def plot_loss(losses):
+def plot_loss(losses, title, **kwargs):
+    plt.figure(figsize=(9.6, 4.8))
+
     for lr, loss in losses.items():
-        train_loss, val_loss, _ = losses[lr]
+        train_loss, val_loss = loss
         plt.plot(train_loss, label=str(lr))
+
+    plt.title(f'Dataset(s) {title[0]} - {title[1]} Points')
 
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
-    plt.show()
+
+    plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
 def main():
-    dfs = {'all': dataset.CytokineDataset(
-            [f for f in glob.glob(os.path.join('data/final', '*PeptideComparison*.pkl'))]
-        )}
-    for i in range(1, 10):
-        dfs[i] = dataset.CytokineDataset(
-            [f for f in glob.glob(os.path.join('data/final', f'*PeptideComparison_{i}*.pkl'))]
-        )
-
     train_percent = 0.7
     valid_percent = 0.15
     test_percent = 0.15
 
-    for n, df in dfs.items():
+    datasets = [*[i for i in range(1, 10)], 'all']
+    learn_rates = [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+
+    for n in datasets:
+        params = {
+            'max_epochs': 100,
+            'df': n,
+        }
+
+        if n == 'all':
+            df = [f for f in glob.glob(os.path.join('data/final', '*PeptideComparison*.pkl'))]
+        else:
+            df = [f for f in glob.glob(os.path.join('data/final', f'*PeptideComparison_{n}*.pkl'))]
+
+        df = dataset.CytokineDataset(df)
+        # print(df[0][2].shape)
+
         train_num = int(train_percent * len(df))
         valid_num = int(valid_percent * len(df))
         test_num = len(df) - (train_num + valid_num)
@@ -62,34 +75,52 @@ def main():
         val_loader = data.DataLoader(val_set, batch_size=1, shuffle=True)
         test_loader = data.DataLoader(test_set, batch_size=1, shuffle=True)
 
-        params = {
-            'max_epochs': 100
-        }
+        print(f'Training on dataset {params["df"]} with {train_num} points')
 
-        losses = {lr: None for lr in [0.1, 0.01, 0.05, 0.001, 0.0005, 0.0001]}
-        for lr in losses.keys():
+        losses = {}
+
+        for lr in learn_rates:
             nn = model.CytokineModel(6, 2, 5)
 
             criterion = torch.nn.MSELoss()
             optimizer = torch.optim.Adam(nn.parameters(), lr)
 
             train_loss, val_loss = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
-            losses[lr] = [train_loss, val_loss, deepcopy(nn)]
-            torch.save(nn, f'model/nn-{n}-{lr}.pth')
+            losses[lr] = [train_loss, val_loss]
+            torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
 
-        plot_loss(losses)
+        plot_loss(losses, (n, train_num), **params)
 
 
 if __name__ == '__main__':
-    main()
+    # main()
 
-    for f in glob.glob('model/*.pth'):
-        model = torch.load(f)
-        f = f[: -4].split('-')
-        print(f[-1] + ':')
-        for parameter in model.parameters():
-            print(parameter.data)
+    model = torch.load('model/nn-1-0.001.pth')
+    model.eval()
 
-        print()
+    f = open('figure/predictions.csv', 'w')
+    print('target, prediction', file=f)
+
+    for n in range(2, 10):
+        df = [f for f in glob.glob(os.path.join('data/final', f'*PeptideComparison_{n}*.pkl'))]
+        df = dataset.CytokineDataset(df)
+        df = data.DataLoader(df, batch_size=1)
+
+        for x, y, r in df:
+            pred = model(x).squeeze().detach().numpy()
+            target = r[0, :, -2].detach().numpy()
+
+            print(f'{target}, {pred}', file=f)
+
+    f.close()
+
+    # for f in glob.glob('model/*.pth'):
+    #     model = torch.load(f)
+    #     f = f[: -4].split('-')
+    #     print(f[-1] + ':')
+    #     for parameter in model.parameters():
+    #         print(parameter.data)
+    #
+    #     print()
 
     print('hello world!')
