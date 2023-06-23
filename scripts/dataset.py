@@ -121,13 +121,29 @@ class CytokineDataset(Dataset):
         if type(folder) is str and os.path.isdir(folder):
             self.pkl_files = glob.glob(os.path.join(folder, '*.pkl'))
         elif type(folder) is list:
-            self.pkl_files = [*folder]
+            self.pkl_files = folder
         else:
             raise TypeError
 
         self.dfs = read_pickel_files(self.pkl_files)
-        self.all_dfs = pd.concat(self.dfs)
+        self.X = pd.DataFrame()
+        for i in range(len(self.dfs)):
+            self.dfs[i] = self.dfs[i].assign(Dataset=i*10)
+            for k, v in enumerate(set(self.dfs[i].index.get_level_values('TCellNumber'))):
+                self.dfs[i].loc[
+                    self.dfs[i].index.get_level_values('TCellNumber') == v, 'Dataset'
+                ] += k
+
+            # if len(t_cell_nums) != 1:
+            #     for j, n in enumerate(t_cell_nums):
+            #         df = self.dfs[i].iloc[self.dfs[i].index.get_level_values('TCellNumber') == n]
+            #         self.dfs[i] = df.assign(Dataset=i*10+j)
+
+            self.dfs[i] = self.dfs[i].set_index('Dataset', append=True)
+
         self.X = pd.concat(self.dfs)
+        self.X = self.X.sort_index(axis=1)
+
         if cytokine != 'all':
             self.X = self.X.iloc[(self.X.index.get_level_values('Cytokine') == cytokine)]
 
@@ -150,21 +166,16 @@ class CytokineDataset(Dataset):
             (self.X.index.get_level_values('Cytokine') == valid_cytokines[4])
         ]
 
-        news_df = self.X.groupby(level=['Cytokine', 'Peptide', 'Concentration'])
-        self.X = news_df.mean()
-
     def __len__(self):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        cytokine_name = self.X.iloc[idx, :].name[0]
-        cytokine_idx = self.classes[cytokine_name]
-        cytokine_vec = self.ident[cytokine_idx]
-
-        concentration_name = self.X.iloc[idx, :].name[-1]
+        concentration_name = self.X.iloc[idx, :].name[3] # [2]
         concentration = self.convert_unit(concentration_name)
 
-        antigen_name = self.X.iloc[idx, :].name[-2]
+        dataset_name = self.X.iloc[idx, :].name[4]
+
+        antigen_name = self.X.iloc[idx, :].name[2]
         antigen = self.antigens[antigen_name]
         antigen_vec = self.ident_antigen[antigen] * concentration
 
@@ -175,8 +186,10 @@ class CytokineDataset(Dataset):
 
         r = self.X.iloc[
             (self.X.index.get_level_values('Peptide') == antigen_name) &
-            (self.X.index.get_level_values('Concentration') == concentration_name)
-        ].to_numpy()
+            (self.X.index.get_level_values('Concentration') == concentration_name) &
+            (self.X.index.get_level_values('Dataset') == dataset_name)
+        ]
+        r = r.droplevel('Dataset').droplevel('TCellNumber').to_numpy()
         r = self.fill_nan(r)
         r = np.cumsum(r, axis=1)
 
