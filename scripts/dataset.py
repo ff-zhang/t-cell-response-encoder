@@ -121,27 +121,16 @@ class CytokineDataset(Dataset):
         if type(folder) is str and os.path.isdir(folder):
             self.pkl_files = glob.glob(os.path.join(folder, '*.pkl'))
         elif type(folder) is list:
-            self.pkl_files = folder
+            self.pkl_files = []
+            for name in folder:
+                self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
         else:
             raise TypeError
 
-        self.dfs = read_pickel_files(self.pkl_files)
-        self.X = pd.DataFrame()
-        for i in range(len(self.dfs)):
-            self.dfs[i] = self.dfs[i].assign(Dataset=i*10)
-            for k, v in enumerate(set(self.dfs[i].index.get_level_values('TCellNumber'))):
-                self.dfs[i].loc[
-                    self.dfs[i].index.get_level_values('TCellNumber') == v, 'Dataset'
-                ] += k
+        # TODO: handle case when label and file isn't 1-1
+        self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
 
-            # if len(t_cell_nums) != 1:
-            #     for j, n in enumerate(t_cell_nums):
-            #         df = self.dfs[i].iloc[self.dfs[i].index.get_level_values('TCellNumber') == n]
-            #         self.dfs[i] = df.assign(Dataset=i*10+j)
-
-            self.dfs[i] = self.dfs[i].set_index('Dataset', append=True)
-
-        self.X = pd.concat(self.dfs)
+        self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
 
         if cytokine != 'all':
@@ -170,12 +159,12 @@ class CytokineDataset(Dataset):
         return self.X.shape[0]
 
     def __getitem__(self, idx):
-        concentration_name = self.X.iloc[idx, :].name[3] # [2]
+        concentration_name = self.X.iloc[idx, :].name[4]
         concentration = self.convert_unit(concentration_name)
 
-        dataset_name = self.X.iloc[idx, :].name[4]
+        dataset_name = self.X.iloc[idx, :].name[0]
 
-        antigen_name = self.X.iloc[idx, :].name[2]
+        antigen_name = self.X.iloc[idx, :].name[3]
         antigen = self.antigens[antigen_name]
         antigen_vec = self.ident_antigen[antigen] * concentration
 
@@ -214,7 +203,7 @@ class CytokineDataset(Dataset):
 
     @staticmethod
     def nan_helper(y):
-        '''Helper to handle indices and logical indices of NaNs.
+        """Helper to handle indices and logical indices of NaNs.
 
         Input:
             - y, 1d numpy array with possible NaNs
@@ -226,7 +215,7 @@ class CytokineDataset(Dataset):
             >>> # linear interpolation of NaNs
             >>> nans, x= nan_helper(y)
             >>> y[nans]= np.interp(x(nans), x(~nans), y[~nans])
-        '''
+        """
 
         return np.isnan(y), lambda z: z.nonzero()[0]
 
