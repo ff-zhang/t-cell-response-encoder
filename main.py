@@ -63,7 +63,7 @@ def main():
 
     f = open('figure/weights.csv', 'w')
 
-   # input weight matrix: [ a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}
+    # input weight matrix: [ a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}
     #                        a_{21}, a_{22}, a_{23}, a_{24}, a_{25}, a_{26} ]
     # output weight matrix: [ b_{11}, b_{12}
     #                         b_{21}, b_{22}
@@ -107,7 +107,7 @@ def main():
 def plot_weights(weights: str = 'figure/weights.csv'):
     df = pd.read_csv(weights)
 
-    # scatter plot w/ average shown
+    # scatter plot showing average
     plt.figure(figsize=(9.6, 4.8))
     for row in df.iterrows():
         plt.scatter(list(range(1, 23)), row[1], alpha=0.7, s=8)
@@ -121,7 +121,7 @@ def plot_weights(weights: str = 'figure/weights.csv'):
     plt.xticks(range(1, 23))
 
     # plt.show()
-    plt.savefig('figure/weights_scatter.png')
+    plt.savefig('figure/weights_scatter.pdf')
 
     # box plot showing median, first and third quartile, interquartile, outliers
     plt.figure(figsize=(9.6, 4.8))
@@ -132,7 +132,20 @@ def plot_weights(weights: str = 'figure/weights.csv'):
     plt.ylabel('Value')
 
     # plt.show()
-    plt.savefig('figure/weights_box.png')
+    plt.savefig('figure/weights_box.pdf')
+
+    # error plot showing standard deviations
+    plt.figure(figsize=(9.6, 4.8))
+    avg = df.mean(0)
+    plt.errorbar(list(range(1, 23)), avg, [df.mean(0) - df.min(0), df.max(0) - avg], fmt='.k', ecolor='gray', lw=1, capsize=2)
+    plt.errorbar(list(range(1, 23)), avg, df.std(0), fmt='ok', lw=3, capsize=4)
+
+    plt.title('Learned Weights on Dataset 1')
+    plt.xlabel('Weight')
+    plt.ylabel('Value')
+
+    # plt.show()
+    plt.savefig('figure/weights_error.pdf')
 
 
 def model_predictions(file: str = 'model/nn-1-0.001.pth'):
