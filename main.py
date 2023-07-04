@@ -1,10 +1,10 @@
 import os
 import glob
-from copy import deepcopy
 
 import torch
 from torch.utils import data
 
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from scripts import dataset, model
@@ -44,33 +44,39 @@ def plot_loss(losses, title, **kwargs):
 
 
 def main():
-    train_percent = 0.7
-    valid_percent = 0.15
-    test_percent = 0.15
-
-    datasets = [*[i for i in range(1, 10)], 'all']
+    train_percent, valid_percent, test_percent = 0.7, 0.15, 0.15
+    ds = 1
     learn_rates = [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
 
-    for n in datasets:
-        params = {
-            'max_epochs': 100,
-            'df': n,
-        }
+    # for n in datasets:
+    params = {
+        'max_epochs': 100,
+        'df': 1,
+    }
 
-        if n == 'all':
-            df = [f for f in glob.glob(os.path.join('data/final', '*PeptideComparison*.pkl'))]
-        else:
-            df = [f for f in glob.glob(os.path.join('data/final', f'*PeptideComparison_{n}*.pkl'))]
+    df = [f'PeptideComparison_{i}' for i in range(1, 10)] if ds == 'all' else [f'PeptideComparison_{ds}']
+    df = dataset.CytokineDataset(df)
 
-        df = dataset.CytokineDataset(df)
-        # print(df[0][2].shape)
+    train_num = int(train_percent * len(df))
+    valid_num = int(valid_percent * len(df))
+    test_num = len(df) - (train_num + valid_num)
 
-        train_num = int(train_percent * len(df))
-        valid_num = int(valid_percent * len(df))
-        test_num = len(df) - (train_num + valid_num)
+    f = open('figure/weights.csv', 'w')
 
-        train_set, val_set, test_set = data.random_split(df, [train_num, valid_num, test_num])
+   # input weight matrix: [ a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}
+    #                        a_{21}, a_{22}, a_{23}, a_{24}, a_{25}, a_{26} ]
+    # output weight matrix: [ b_{11}, b_{12}
+    #                         b_{21}, b_{22}
+    #                         b_{31}, b_{32}
+    #                         b_{41}, b_{42}
+    #                         b_{51}, b_{52} ]
+    f.write('a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}, a_{21}, a_{22}, a_{23}, a_{24}, a_{25}, a_{26},'
+            'b_{11},b_{12}, b_{21}, b_{22}, b_{31}, b_{32}, b_{41}, b_{42}, b_{51}, b_{52}\n')
 
+    # TODO: try with this (maybe seed the split)
+    train_set, val_set, test_set = data.random_split(df, [train_num, valid_num, test_num])
+
+    for _ in range(50):
         train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True)
         val_loader = data.DataLoader(val_set, batch_size=1, shuffle=True)
         test_loader = data.DataLoader(test_set, batch_size=1, shuffle=True)
@@ -79,7 +85,8 @@ def main():
 
         losses = {}
 
-        for lr in learn_rates:
+        # TODO: return to looping over learning rates later
+        for lr in [0.001]:
             nn = model.CytokineModel(6, 2, 5)
 
             criterion = torch.nn.MSELoss()
@@ -87,19 +94,55 @@ def main():
 
             train_loss, val_loss = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
             losses[lr] = [train_loss, val_loss]
-            torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
+            # torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
 
-        plot_loss(losses, (n, train_num), **params)
+        plot_loss(losses, (ds, train_num), **params)
+
+        f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
+        f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
+
+    f.close()
 
 
-if __name__ == '__main__':
-    # main()
+def plot_weights(weights: str = 'figure/weights.csv'):
+    df = pd.read_csv(weights)
 
-    model = torch.load('model/nn-1-0.001.pth')
+    # scatter plot w/ average shown
+    plt.figure(figsize=(9.6, 4.8))
+    for row in df.iterrows():
+        plt.scatter(list(range(1, 23)), row[1], alpha=0.7, s=8)
+
+    plt.scatter(list(range(1, 23)), df.sum() / 22, color='black')
+
+    plt.title('Learned Weights on Dataset 1')
+    plt.xlabel('Weight')
+    plt.ylabel('Value')
+
+    plt.xticks(range(1, 23))
+
+    # plt.show()
+    plt.savefig('figure/weights_scatter.png')
+
+    # box plot showing median, first and third quartile, interquartile, outliers
+    plt.figure(figsize=(9.6, 4.8))
+    plt.boxplot(df)
+
+    plt.title('Learned Weights on Dataset 1')
+    plt.xlabel('Weight')
+    plt.ylabel('Value')
+
+    # plt.show()
+    plt.savefig('figure/weights_box.png')
+
+
+def model_predictions(file: str = 'model/nn-1-0.001.pth'):
+    model = torch.load(file)
     model.eval()
 
     f = open('figure/predictions.csv', 'w')
     print('target, prediction', file=f)
+
+    fig, axes = plt.subplots(nrows=8, ncols=1, figsize=(), sharex=True, sharey=True)
 
     for n in range(2, 10):
         df = [f for f in glob.glob(os.path.join('data/final', f'*PeptideComparison_{n}*.pkl'))]
@@ -107,12 +150,26 @@ if __name__ == '__main__':
         df = data.DataLoader(df, batch_size=1)
 
         for x, y, r in df:
-            pred = model(x).squeeze().detach().numpy()
             target = r[0, :, -2].detach().numpy()
+            pred = model(x).squeeze().detach().numpy()
 
             print(f'{target}, {pred}', file=f)
 
+            axes[n-2].plot(target, label="Target")
+            axes[n-2].plot(pred, label="Prediction")
+            # axes[n-2].legend()
+
+    plt.show()
+
     f.close()
+
+
+if __name__ == '__main__':
+    main()
+
+    plot_weights()
+
+    # model_predictions()
 
     # for f in glob.glob('model/*.pth'):
     #     model = torch.load(f)

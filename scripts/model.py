@@ -25,14 +25,14 @@ class CytokineModel(nn.Module):
         return out
 
 
-def train(model: nn.Module, train_loader, validation_loader, criterion, optimizer, **args):
-    train_history, val_history = np.zeros(args['max_epochs']), np.zeros(args['max_epochs'])
+def train(model: nn.Module, train_loader, validation_loader, criterion, optimizer, **kwargs):
+    train_history, val_history = np.zeros(kwargs['max_epochs']), np.zeros(kwargs['max_epochs'])
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
     s = time.time()
-    for epoch in tqdm(range(args['max_epochs'])):
+    for epoch in tqdm(range(kwargs['max_epochs'])):
         train_loss, val_loss = 0, 0
         for phase in ['train', 'val']:
             if phase == 'train':
@@ -58,6 +58,6 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
     e = time.time()
 
-    print(f'\nTraining time: {round(e - s, 5)} seconds\n')
+    print(f'\tTraining time: {round(e - s, 5)} seconds\n')
 
     return train_history, val_history
