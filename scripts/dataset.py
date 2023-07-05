@@ -97,7 +97,7 @@ def read_pickel_files(files: Optional[List[str]] = None):
 
 
 class CytokineDataset(Dataset):
-    def __init__(self, folder: Union[str, List[str]], cytokine: str = 'all'):
+    def __init__(self, folder: Union[str, List[str]], cytokine: str = 'all', antigens: dict = None):
         self.classes = {
             'IFNg': 0,
             'IL-17A': 1,
@@ -107,15 +107,18 @@ class CytokineDataset(Dataset):
         }
         self.ident = torch.eye(len(self.classes))
 
-        self.antigens = {
-            'N4': 0,
-            'Q4': 1,
-            'T4': 2,
-            'V4': 3,
-            'G4': 4,
-            'E1': 5,
-            # 'A2': 6,
-        }
+        if antigens is None:
+            self.antigens = {
+                'N4': 0,
+                'Q4': 1,
+                'T4': 2,
+                'V4': 3,
+                'G4': 4,
+                'E1': 5,
+                # 'A2': 6,
+            }
+        else:
+            self.antigens = antigens
         self.ident_antigen = torch.eye(len(self.antigens))
 
         if type(folder) is str and os.path.isdir(folder):
@@ -136,24 +139,16 @@ class CytokineDataset(Dataset):
         if cytokine != 'all':
             self.X = self.X.iloc[(self.X.index.get_level_values('Cytokine') == cytokine)]
 
-        valid_antigens = list(self.antigens)
-        self.X = self.X.iloc[
-            (self.X.index.get_level_values('Peptide') == valid_antigens[0]) |
-            (self.X.index.get_level_values('Peptide') == valid_antigens[1]) |
-            (self.X.index.get_level_values('Peptide') == valid_antigens[2]) |
-            (self.X.index.get_level_values('Peptide') == valid_antigens[3]) |
-            (self.X.index.get_level_values('Peptide') == valid_antigens[4]) |
-            (self.X.index.get_level_values('Peptide') == valid_antigens[5])
-        ]
+        # valid_antigens = list(self.antigens)
 
-        valid_cytokines = list(self.classes)
-        self.X = self.X.iloc[
-            (self.X.index.get_level_values('Cytokine') == valid_cytokines[0]) |
-            (self.X.index.get_level_values('Cytokine') == valid_cytokines[1]) |
-            (self.X.index.get_level_values('Cytokine') == valid_cytokines[2]) |
-            (self.X.index.get_level_values('Cytokine') == valid_cytokines[3]) |
-            (self.X.index.get_level_values('Cytokine') == valid_cytokines[4])
-        ]
+        self.X = self.X.query(
+            ' | '.join(f'(@self.X.index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens)
+        )
+
+        # valid_cytokines = list(self.classes)
+        self.X = self.X.query(
+            ' | '.join(f'(@self.X.index.get_level_values("Cytokine") == "{cyto}")' for cyto in self.classes)
+        )
 
     def __len__(self):
         return self.X.shape[0]
