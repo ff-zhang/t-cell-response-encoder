@@ -4,13 +4,12 @@ import glob
 from typing import List, Union, Optional
 
 import numpy as np
-import pandas
 import pandas as pd
 
 import torch
 from torch.utils.data import Dataset
 
-from scripts.utils import createLabelDict, set_standard_order
+from scripts.utils import set_standard_order
 
 
 def read_hdf_files(debug=True):
@@ -134,38 +133,39 @@ class CytokineDataset(Dataset):
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
-        self.X = self.X.sort_index(axis=1)
 
         if cytokine != 'all':
             self.X = self.X.iloc[(self.X.index.get_level_values('Cytokine') == cytokine)]
 
-        # valid_antigens = list(self.antigens)
-
+        # get valid antigens and cytokines
         self.X = self.X.query(
             ' | '.join(f'(@self.X.index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens)
         )
-
-        # valid_cytokines = list(self.classes)
         self.X = self.X.query(
             ' | '.join(f'(@self.X.index.get_level_values("Cytokine") == "{cyto}")' for cyto in self.classes)
         )
 
+        self.X = self.X.sort_index(axis=1)
+        self.X = self.X.sort_index(level=['Dataset', 'TCellNumber', 'Peptide', 'Concentration', 'Cytokine'])
+        self.X = self.X.cumsum(axis=1).interpolate(axis=1)
+
     def __len__(self):
-        return self.X.shape[0]
+        assert self.X.shape[0] / 5 == self.X.shape[0] // 5
+        return self.X.shape[0] // 5
 
     def __getitem__(self, idx):
-        concentration_name = self.X.iloc[idx, :].name[4]
-        concentration = self.convert_unit(concentration_name)
+        idx = idx * 5
 
         dataset_name = self.X.iloc[idx, :].name[0]
+
+        concentration_name = self.X.iloc[idx, :].name[4]
+        concentration = self.convert_unit(concentration_name)
 
         antigen_name = self.X.iloc[idx, :].name[3]
         antigen = self.antigens[antigen_name]
         antigen_vec = self.ident_antigen[antigen] * concentration
 
         cytokine_measure = self.X.iloc[idx, :].to_numpy()
-        cytokine_measure = self.fill_nan(cytokine_measure)
-        cytokine_measure = np.cumsum(cytokine_measure)
         cytokine_measure = torch.from_numpy(cytokine_measure)
 
         r = self.X.iloc[
@@ -174,8 +174,6 @@ class CytokineDataset(Dataset):
             (self.X.index.get_level_values('Dataset') == dataset_name)
         ]
         r = r.droplevel('Dataset').droplevel('TCellNumber').to_numpy()
-        r = self.fill_nan(r)
-        r = np.cumsum(r, axis=1)
 
         return antigen_vec.float(), cytokine_measure.float(), torch.from_numpy(r).float()
 
@@ -184,6 +182,8 @@ class CytokineDataset(Dataset):
         match = re.match(r'([0-9]+)([a-z]+)', c, re.I)
         if match:
             items = match.groups()
+        else:
+            raise ValueError
 
         amount = float(items[0])
         unit = items[1][0]
@@ -195,61 +195,3 @@ class CytokineDataset(Dataset):
             amount = amount * 1e-6
 
         return np.log10(amount)
-
-    @staticmethod
-    def nan_helper(y):
-        """Helper to handle indices and logical indices of NaNs.
-
-        Input:
-            - y, 1d numpy array with possible NaNs
-        Output:
-            - nans, logical indices of NaNs
-            - index, a function, with signature indices= index(logical_indices),
-              to convert logical indices of NaNs to 'equivalent' indices
-        Example:
-            >>> # linear interpolation of NaNs
-            >>> nans, x= nan_helper(y)
-            >>> y[nans]= np.interp(x(nans), x(~nans), y[~nans])
-        """
-
-        return np.isnan(y), lambda z: z.nonzero()[0]
-
-    @staticmethod
-    def fill_nan(y):
-        nans, x = CytokineDataset.nan_helper(y)
-        y[nans] = np.interp(x(nans), x(~nans), y[~nans])
-        return y
-
-    def get_features(self, df: pd.DataFrame, antigen: str, concentration: str):
-        valid_antigens = list(self.antigens)
-        df = df.iloc[
-            (df.index.get_level_values('Peptide') == valid_antigens[0]) |
-            (df.index.get_level_values('Peptide') == valid_antigens[1]) |
-            (df.index.get_level_values('Peptide') == valid_antigens[2]) |
-            (df.index.get_level_values('Peptide') == valid_antigens[3]) |
-            (df.index.get_level_values('Peptide') == valid_antigens[4]) |
-            (df.index.get_level_values('Peptide') == valid_antigens[5])
-        ]
-
-        valid_cytokines = list(self.classes)
-        df = df.iloc[
-            (df.index.get_level_values('Cytokine') == valid_cytokines[0]) |
-            (df.index.get_level_values('Cytokine') == valid_cytokines[1]) |
-            (df.index.get_level_values('Cytokine') == valid_cytokines[2]) |
-            (df.index.get_level_values('Cytokine') == valid_cytokines[3]) |
-            (df.index.get_level_values('Cytokine') == valid_cytokines[4])
-        ]
-        news_df = df.groupby(level=['Cytokine', 'Peptide', 'Concentration'])
-        df = news_df.mean()
-        r = df.iloc[
-            (df.index.get_level_values('Peptide') == antigen) &
-            (df.index.get_level_values('Concentration') == concentration)
-        ].to_numpy()
-
-        antigen_name = antigen
-        antigen = self.antigens[antigen_name]
-        antigen_vec = self.ident_antigen[antigen] * self.convert_unit(concentration)
-
-        r = self.fill_nan(r)
-        r = np.cumsum(r, axis=1)
-        return antigen_vec.float(), torch.from_numpy(r).float()
