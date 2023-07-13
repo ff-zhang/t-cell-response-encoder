@@ -156,12 +156,10 @@ class CytokineDataset(Dataset):
     def __getitem__(self, idx):
         idx = idx * 5
 
-        dataset_name = self.X.iloc[idx, :].name[0]
+        dataset_name, _, tcell_count, antigen_name, concentration_name = self.X.iloc[idx, :].name
 
-        concentration_name = self.X.iloc[idx, :].name[4]
         concentration = self.convert_unit(concentration_name)
 
-        antigen_name = self.X.iloc[idx, :].name[3]
         antigen = self.antigens[antigen_name]
         antigen_vec = self.ident_antigen[antigen] * concentration
 
@@ -171,7 +169,8 @@ class CytokineDataset(Dataset):
         r = self.X.iloc[
             (self.X.index.get_level_values('Peptide') == antigen_name) &
             (self.X.index.get_level_values('Concentration') == concentration_name) &
-            (self.X.index.get_level_values('Dataset') == dataset_name)
+            (self.X.index.get_level_values('Dataset') == dataset_name) &
+            (self.X.index.get_level_values('TCellNumber') == tcell_count)
         ]
         r = r.droplevel('Dataset').droplevel('TCellNumber').to_numpy()
 
