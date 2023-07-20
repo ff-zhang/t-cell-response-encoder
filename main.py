@@ -32,7 +32,8 @@ def plot_loss(losses, title, **kwargs):
 
     for lr, loss in losses.items():
         train_loss, val_loss = loss
-        plt.plot(train_loss, label=str(lr))
+        plt.plot(train_loss, label='train: ' + str(lr))
+        plt.plot(val_loss, label='val.: ' + str(lr))
 
     plt.title(f'Dataset(s) {title[0]} - {title[1]} Points')
 
@@ -43,25 +44,30 @@ def plot_loss(losses, title, **kwargs):
     plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
-def main():
+def main(filename=None, write=False):
+    if write is True and filename is None:
+        raise FileExistsError
+
     train_percent, valid_percent, test_percent = 0.7, 0.15, 0.15
-    ds = 1
-    learn_rates = [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+    learn_rates = [0.01, 0.001, 0.0001] # [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
 
     # for n in datasets:
     params = {
-        'max_epochs': 100,
-        'df': 1,
+        'max_epochs': 50,
+        'df': 'all'
     }
 
-    df = [f'PeptideComparison_{i}' for i in range(1, 10)] if ds == 'all' else [f'PeptideComparison_{ds}']
+    # antigens = { 'N4': 0, 'T4': 1, 'E1': 2 }
+    df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
     df = dataset.CytokineDataset(df)
 
     train_num = int(train_percent * len(df))
     valid_num = int(valid_percent * len(df))
     test_num = len(df) - (train_num + valid_num)
 
-    f = open('figure/weights.csv', 'w')
+    if write:
+        f = open(filename, 'w')
+        f.close()
 
     # input weight matrix: [ a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}
     #                        a_{21}, a_{22}, a_{23}, a_{24}, a_{25}, a_{26} ]
@@ -70,10 +76,7 @@ def main():
     #                         b_{31}, b_{32}
     #                         b_{41}, b_{42}
     #                         b_{51}, b_{52} ]
-    f.write('a_{11}, a_{12}, a_{13}, a_{14}, a_{15}, a_{16}, a_{21}, a_{22}, a_{23}, a_{24}, a_{25}, a_{26},'
-            'b_{11},b_{12}, b_{21}, b_{22}, b_{31}, b_{32}, b_{41}, b_{42}, b_{51}, b_{52}\n')
 
-    # TODO: try with this (maybe seed the split)
     train_set, val_set, test_set = data.random_split(df, [train_num, valid_num, test_num])
 
     for _ in range(50):
@@ -86,42 +89,43 @@ def main():
         losses = {}
 
         # TODO: return to looping over learning rates later
-        for lr in [0.001]:
+        for lr in learn_rates:
             nn = model.CytokineModel(6, 2, 5)
 
-            criterion = torch.nn.MSELoss()
+            criterion = torch.nn.MSELoss('mean')
             optimizer = torch.optim.Adam(nn.parameters(), lr)
 
             train_loss, val_loss = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
             losses[lr] = [train_loss, val_loss]
             # torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
 
-        plot_loss(losses, (ds, train_num), **params)
+        # plot_loss(losses, (params['df'], train_num), **params)
 
-        f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
-        f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
+        if write:
+            with open(filename, 'a') as f:
+                f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
+                f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
 
-    f.close()
 
-
-def plot_weights(weights: str = 'figure/weights.csv'):
+def plot_weights(weights: str = 'out/weights.csv', file_format: str = 'pdf'):
     df = pd.read_csv(weights)
+    X = list(range(1, df.shape[1] + 1))
 
     # scatter plot showing average
     plt.figure(figsize=(9.6, 4.8))
     for row in df.iterrows():
-        plt.scatter(list(range(1, 23)), row[1], alpha=0.7, s=8)
+        plt.scatter(X, row[1], alpha=0.7, s=8)
 
-    plt.scatter(list(range(1, 23)), df.sum() / 22, color='black')
+    plt.scatter(X, df.sum() / 22, color='black')
 
     plt.title('Learned Weights on Dataset 1')
     plt.xlabel('Weight')
     plt.ylabel('Value')
 
-    plt.xticks(range(1, 23))
+    plt.xticks(X)
 
     # plt.show()
-    plt.savefig('figure/weights_scatter.pdf')
+    plt.savefig(f'figure/weights_all_scatter.{file_format}')
 
     # box plot showing median, first and third quartile, interquartile, outliers
     plt.figure(figsize=(9.6, 4.8))
@@ -132,27 +136,27 @@ def plot_weights(weights: str = 'figure/weights.csv'):
     plt.ylabel('Value')
 
     # plt.show()
-    plt.savefig('figure/weights_box.pdf')
+    plt.savefig(f'figure/weights_all_box.{file_format}')
 
     # error plot showing standard deviations
     plt.figure(figsize=(9.6, 4.8))
     avg = df.mean(0)
-    plt.errorbar(list(range(1, 23)), avg, [df.mean(0) - df.min(0), df.max(0) - avg], fmt='.k', ecolor='gray', lw=1, capsize=2)
-    plt.errorbar(list(range(1, 23)), avg, df.std(0), fmt='ok', lw=3, capsize=4)
+    plt.errorbar(X, avg, [df.mean(0) - df.min(0), df.max(0) - avg], fmt='.k', ecolor='gray', lw=1, capsize=2)
+    plt.errorbar(X, avg, df.std(0), fmt='ok', lw=3, capsize=4)
 
     plt.title('Learned Weights on Dataset 1')
     plt.xlabel('Weight')
     plt.ylabel('Value')
 
     # plt.show()
-    plt.savefig('figure/weights_error.pdf')
+    plt.savefig(f'figure/weights_all_error.{file_format}')
 
 
 def model_predictions(file: str = 'model/nn-1-0.001.pth'):
     model = torch.load(file)
     model.eval()
 
-    f = open('figure/predictions.csv', 'w')
+    f = open('out/predictions.csv', 'w')
     print('target, prediction', file=f)
 
     fig, axes = plt.subplots(nrows=8, ncols=1, figsize=(), sharex=True, sharey=True)
@@ -178,19 +182,10 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
 
 
 if __name__ == '__main__':
-    main()
+    main(filename='out/weights_all.csv', write=False)
 
-    plot_weights()
+    # plot_weights('out/weights_all.csv', file_format='png')
 
     # model_predictions()
-
-    # for f in glob.glob('model/*.pth'):
-    #     model = torch.load(f)
-    #     f = f[: -4].split('-')
-    #     print(f[-1] + ':')
-    #     for parameter in model.parameters():
-    #         print(parameter.data)
-    #
-    #     print()
 
     print('hello world!')
