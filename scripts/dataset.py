@@ -46,7 +46,7 @@ def read_hdf_files(debug=True):
             if not file.lower().endswith('.hdf'):
                 continue
 
-            df: pandas.DataFrame = pd.read_hdf(data_path + file)
+            df: pd.DataFrame = pd.read_hdf(data_path + file)
             mask = [True] * df.shape[0]
 
             for index_name in df.index.names:
