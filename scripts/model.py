@@ -34,27 +34,25 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
     s = time.time()
     for epoch in tqdm(range(kwargs['max_epochs'])):
         train_loss, val_loss = 0, 0
-        for phase in ['train', 'val']:
-            if phase == 'train':
-                dataloader = train_loader
-            else:
-                dataloader = validation_loader
 
-            for x, y, r in dataloader:
-                optimizer.zero_grad()
+        for x, _, r in train_loader:
+            optimizer.zero_grad()
 
+            outputs = model(x.to(device))
+            loss = criterion(outputs.squeeze(), r[:, :, -2].to(device))
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+
+        with torch.no_grad():
+            for x, _, r in validation_loader:
                 outputs = model(x.to(device))
                 loss = criterion(outputs.squeeze(), r[:, :, -2].to(device))
-                loss.backward()
-                optimizer.step()
+                val_loss += loss.item()
 
-                if phase == 'train':
-                    train_loss += loss.item()
-                else:
-                    val_loss += loss.item()
-
-        train_history[epoch] = train_loss
-        val_history[epoch] = val_loss
+        train_history[epoch] = train_loss / len(train_loader.dataset)
+        val_history[epoch] = val_loss / len(validation_loader.dataset)
 
     e = time.time()
 
