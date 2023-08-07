@@ -44,12 +44,23 @@ def plot_loss(losses, title, **kwargs):
     plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
-def main(filename=None, write=False):
+def get_actual_conc(df: dataset.CytokineDataset, norm_y: float) -> float:
+    if df.normalize is None:
+        raise AttributeError
+
+    if df.normalize == 'min-max':
+        return (norm_y * (df.x2 - df.x1) + df.x1)[-11]
+
+    elif df.normalize == 'std-score':
+        raise NotImplementedError
+
+
+def train_model(filename=None, write=False):
     if write is True and filename is None:
         raise FileExistsError
 
     train_percent, valid_percent, test_percent = 0.7, 0.15, 0.15
-    learn_rates = [0.01, 0.001, 0.0001] # [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+    learn_rates = [0.01, 0.001, 0.0001]     # [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
 
     # for n in datasets:
     params = {
@@ -59,7 +70,7 @@ def main(filename=None, write=False):
 
     # antigens = { 'N4': 0, 'T4': 1, 'E1': 2 }
     df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
-    df = dataset.CytokineDataset(df)
+    df = dataset.CytokineDataset(df, normalize='min-max')
 
     train_num = int(train_percent * len(df))
     valid_num = int(valid_percent * len(df))
@@ -99,7 +110,7 @@ def main(filename=None, write=False):
             losses[lr] = [train_loss, val_loss]
             # torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
 
-        # plot_loss(losses, (params['df'], train_num), **params)
+        plot_loss(losses, (params['df'], train_num), **params)
 
         if write:
             with open(filename, 'a') as f:
@@ -182,7 +193,7 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
 
 
 if __name__ == '__main__':
-    main(filename='out/weights_all.csv', write=False)
+    train_model(filename='out/weights_all.csv', write=False)
 
     # plot_weights('out/weights_all.csv', file_format='png')
 

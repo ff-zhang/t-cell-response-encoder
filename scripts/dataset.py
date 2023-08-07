@@ -96,7 +96,8 @@ def read_pickel_files(files: Optional[List[str]] = None):
 
 
 class CytokineDataset(Dataset):
-    def __init__(self, folder: Union[str, List[str]], cytokine: str = 'all', antigens: dict = None):
+    def __init__(self, folder: Union[str, List[str]], cytokine: str = 'all', antigens: dict = None,
+                 normalize: str = None):
         self.classes = {
             'IFNg': 0,
             'IL-17A': 1,
@@ -148,6 +149,19 @@ class CytokineDataset(Dataset):
         self.X = self.X.sort_index(axis=1)
         self.X = self.X.sort_index(level=['Dataset', 'TCellNumber', 'Peptide', 'Concentration', 'Cytokine'])
         self.X = self.X.cumsum(axis=1).interpolate(axis=1)
+
+        self.normalize = normalize
+        assert self.normalize is None or self.normalize in ['min-max', 'std-score']
+        if normalize is not None:
+            if normalize == 'min-max':
+                self.x1 = self.X.min()
+                self.x2 = self.X.max()
+                self.X = (self.X - self.X.min()) / (self.X.max() - self.X.min())
+
+            elif normalize == 'std-score':
+                self.x1 = self.X.mean()
+                self.x2 = self.X.std()
+                self.X.iloc[:, 0: -1] = self.X.iloc[:, 0: -1].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
 
     def __len__(self):
         assert self.X.shape[0] / 5 == self.X.shape[0] // 5

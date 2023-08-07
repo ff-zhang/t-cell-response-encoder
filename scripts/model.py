@@ -39,7 +39,8 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
             optimizer.zero_grad()
 
             outputs = model(x.to(device))
-            loss = criterion(outputs.squeeze(), r[:, :, -2].to(device))
+            # gets the entry at 72 hours
+            loss = criterion(outputs.squeeze(), r[:, :, -11].to(device))
             loss.backward()
             optimizer.step()
 
