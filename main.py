@@ -41,6 +41,7 @@ def plot_loss(losses, title, **kwargs):
     plt.ylabel('Loss')
     plt.legend()
 
+    print(f'Saving loss to figure/nn-{kwargs["df"]}.png')
     plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
@@ -55,12 +56,19 @@ def get_actual_conc(df: dataset.CytokineDataset, norm_y: float) -> float:
         raise NotImplementedError
 
 
-def train_model(filename=None, write=False):
+def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """
+    Calculates the mean absolute percentage difference between the input and the target.
+    """
+    return torch.mean(torch.abs((target - input) / target))
+
+
+def train_model(filename=None, criterion=None, write=False):
     if write is True and filename is None:
         raise FileExistsError
 
     train_percent, valid_percent, test_percent = 0.7, 0.15, 0.15
-    learn_rates = [0.01, 0.001, 0.0001]     # [0.1, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+    learn_rates = [0.01, 0.001, 0.0001]
 
     # for n in datasets:
     params = {
@@ -103,7 +111,10 @@ def train_model(filename=None, write=False):
         for lr in learn_rates:
             nn = model.CytokineModel(6, 2, 5)
 
-            criterion = torch.nn.MSELoss('mean')
+            if criterion == "MAPE":
+                criterion = MAPE_loss
+            else:
+                criterion = torch.nn.MSELoss('mean')
             optimizer = torch.optim.Adam(nn.parameters(), lr)
 
             train_loss, val_loss = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
@@ -193,7 +204,7 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
 
 
 if __name__ == '__main__':
-    train_model(filename='out/weights_all.csv', write=False)
+    train_model(filename='out/weights_all.csv', criterion='MAPE', write=False)
 
     # plot_weights('out/weights_all.csv', file_format='png')
 
