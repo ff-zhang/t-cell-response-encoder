@@ -88,7 +88,7 @@ def load_dataset(level_values, return_df=True, debug=True):
     return cytokines, df
 
 
-def read_pickel_files(files: Optional[List[str]] = None):
+def read_pickel_files(files: Optional[list[str]] = None):
     if files is None:
         files = glob.glob(os.path.join('data/final', '*.pkl'))
 
@@ -96,15 +96,19 @@ def read_pickel_files(files: Optional[List[str]] = None):
 
 
 class CytokineDataset(Dataset):
-    def __init__(self, folder: Union[str, List[str]], cytokine: str = 'all', antigens: dict = None,
+    def __init__(self, folder: Union[str, list[str]], cytokine: list[str] = 'all', antigens: dict = None,
                  normalize: str = None):
-        self.classes = {
-            'IFNg': 0,
-            'IL-17A': 1,
-            'IL-2': 2,
-            'IL-6': 3,
-            'TNFa': 4,
-        }
+        if cytokine != 'all':
+            self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
+        else:
+            self.classes = {
+                'IFNg': 0,
+                'IL-17A': 1,
+                'IL-2': 2,
+                'IL-6': 3,
+                'TNFa': 4,
+            }
+
         self.ident = torch.eye(len(self.classes))
 
         if antigens is None:
@@ -135,9 +139,6 @@ class CytokineDataset(Dataset):
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
 
-        if cytokine != 'all':
-            self.X = self.X.iloc[(self.X.index.get_level_values('Cytokine') == cytokine)]
-
         # get valid antigens and cytokines
         self.X = self.X.query(
             ' | '.join(f'(@self.X.index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens)
@@ -163,12 +164,15 @@ class CytokineDataset(Dataset):
                 self.x2 = self.X.std()
                 self.X.iloc[:, 0: -1] = self.X.iloc[:, 0: -1].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
 
+            elif normalize == 'logarithm':
+                self.X = np.log10(self.X)
+
     def __len__(self):
-        assert self.X.shape[0] / 5 == self.X.shape[0] // 5
-        return self.X.shape[0] // 5
+        assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)
+        return self.X.shape[0] // len(self.classes)
 
     def __getitem__(self, idx):
-        idx = idx * 5
+        idx = idx * len(self.classes)
 
         dataset_name, _, tcell_count, antigen_name, concentration_name = self.X.iloc[idx, :].name
 
@@ -208,3 +212,21 @@ class CytokineDataset(Dataset):
             amount = amount * 1e-6
 
         return np.log10(amount)
+
+
+if __name__ == '__main__':
+    import os
+    from scripts import dataset
+
+    params = {
+        'max_epochs': 40,
+        'df': 'all'
+    }
+
+    os.chdir('../')
+
+    for n in range(2, 10):
+        df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
+    df = dataset.CytokineDataset(df, normalize='min-max', cytokine=['IFNg, IL-17A'])
+
+    print('hello world!')
