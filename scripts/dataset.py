@@ -149,6 +149,10 @@ class CytokineDataset(Dataset):
 
         self.X = self.X.sort_index(axis=1)
         self.X = self.X.sort_index(level=['Dataset', 'TCellNumber', 'Peptide', 'Concentration', 'Cytokine'])
+
+        # smooth and apply log to the data
+        self.X = self.X / np.nanmin(self.X, axis=1, keepdims=True)
+        self.X = np.log10(self.X)
         self.X = self.X.cumsum(axis=1).interpolate(axis=1)
 
         self.normalize = normalize
@@ -163,9 +167,6 @@ class CytokineDataset(Dataset):
                 self.x1 = self.X.mean()
                 self.x2 = self.X.std()
                 self.X.iloc[:, 0: -1] = self.X.iloc[:, 0: -1].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
-
-            elif normalize == 'logarithm':
-                self.X = np.log10(self.X)
 
     def __len__(self):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)

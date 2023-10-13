@@ -49,7 +49,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
         with torch.no_grad():
             for x, _, r in validation_loader:
                 outputs = model(x.to(device))
-                loss = criterion(outputs.squeeze(), r[:, :, -2].to(device))
+                loss = criterion(outputs.squeeze(), r[:, :, -11].to(device))
                 val_loss += loss.item()
 
         train_history[epoch] = train_loss / len(train_loader.dataset)

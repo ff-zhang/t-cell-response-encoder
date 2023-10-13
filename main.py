@@ -4,6 +4,7 @@ import glob
 import torch
 from torch.utils import data
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -25,6 +26,11 @@ LEVEL_VALUES = [
     # Features
     ['concentration', 'derivative', 'integral']
 ]
+
+params = {
+    'max_epochs': 40,
+    'df': 'all'
+}
 
 
 def plot_loss(losses, title, **kwargs):
@@ -103,11 +109,10 @@ def train_model(filename=None, criterion=None, write=False):
         val_loader = data.DataLoader(val_set, batch_size=1, shuffle=True)
         test_loader = data.DataLoader(test_set, batch_size=1, shuffle=True)
 
-        print(f'Training on dataset {params["df"]} with {train_num} points')
+        print(f'Iter. {_}: Training on dataset {params["df"]} with {train_num} points')
 
         losses = {}
 
-        # TODO: return to looping over learning rates later
         for lr in learn_rates:
             nn = model.CytokineModel(6, 2, 5)
 
