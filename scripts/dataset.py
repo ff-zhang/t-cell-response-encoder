@@ -1,10 +1,10 @@
-import os
 import re
 import glob
-from typing import List, Union, Optional
+from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
+import scipy
 
 import torch
 from torch.utils.data import Dataset
@@ -65,7 +65,7 @@ def read_hdf_files(debug=True):
     return df_full
 
 
-def load_dataset(level_values, return_df=True, debug=True):
+def load_dataset(level_values):
     df = read_hdf_files()
     df = df.stack().stack().to_frame('value')
     df = set_standard_order(df.reset_index())
@@ -136,24 +136,25 @@ class CytokineDataset(Dataset):
 
         # TODO: handle case when label and file isn't 1-1
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
+        for k in self.dfs.keys():
+            # get valid antigens and cytokines
+            self.dfs[k].query(
+                ' | '.join(f'(@self.dfs[@k].index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens),
+                engine='python', inplace=True
+            )
+            self.dfs[k].query(
+                ' | '.join(f'(@self.dfs[@k].index.get_level_values("Cytokine") == "{cyto}")' for cyto in self.classes),
+                engine='python', inplace=True
+            )
+
+            # normalize, log, and integrate the data
+            self.dfs[k] = np.log10(self.dfs[k] / np.nanmin(self.dfs[k], axis=1, keepdims=True))
+            self.dfs[k].iloc[:, 1:] = scipy.integrate.cumulative_trapezoid(x=self.dfs[k].axes[1].values, y=self.dfs[k], axis=1)
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
-
-        # get valid antigens and cytokines
-        self.X = self.X.query(
-            ' | '.join(f'(@self.X.index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens)
-        )
-        self.X = self.X.query(
-            ' | '.join(f'(@self.X.index.get_level_values("Cytokine") == "{cyto}")' for cyto in self.classes)
-        )
-
         self.X = self.X.sort_index(axis=1)
         self.X = self.X.sort_index(level=['Dataset', 'TCellNumber', 'Peptide', 'Concentration', 'Cytokine'])
-
-        # smooth and apply log to the data
-        self.X = self.X / np.nanmin(self.X, axis=1, keepdims=True)
-        self.X = np.log10(self.X)
-        self.X = self.X.cumsum(axis=1).interpolate(axis=1)
+        self.X = self.X.interpolate(axis=1)
 
         self.normalize = normalize
         assert self.normalize is None or self.normalize in ['min-max', 'std-score']
