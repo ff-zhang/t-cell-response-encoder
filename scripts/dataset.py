@@ -1,3 +1,4 @@
+import os
 import re
 import glob
 from typing import Union, Optional
@@ -134,7 +135,6 @@ class CytokineDataset(Dataset):
         else:
             raise TypeError
 
-        # TODO: handle case when label and file isn't 1-1
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
         for k in self.dfs.keys():
             # get valid antigens and cytokines
