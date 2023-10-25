@@ -28,7 +28,7 @@ LEVEL_VALUES = [
 ]
 
 params = {
-    'max_epochs': 40,
+    'max_epochs': 100,
     'df': 'all'
 }
 
@@ -76,15 +76,8 @@ def train_model(filename=None, criterion=None, write=False):
     train_percent, valid_percent, test_percent = 0.7, 0.15, 0.15
     learn_rates = [0.01, 0.001, 0.0001]
 
-    # for n in datasets:
-    params = {
-        'max_epochs': 50,
-        'df': 'all'
-    }
-
-    # antigens = { 'N4': 0, 'T4': 1, 'E1': 2 }
     df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
-    df = dataset.CytokineDataset(df, normalize='min-max')
+    df = dataset.CytokineDataset(df)
 
     train_num = int(train_percent * len(df))
     valid_num = int(valid_percent * len(df))
@@ -101,7 +94,6 @@ def train_model(filename=None, criterion=None, write=False):
     #                         b_{31}, b_{32}
     #                         b_{41}, b_{42}
     #                         b_{51}, b_{52} ]
-
     train_set, val_set, test_set = data.random_split(df, [train_num, valid_num, test_num])
 
     for _ in range(50):
@@ -124,6 +116,7 @@ def train_model(filename=None, criterion=None, write=False):
 
             train_loss, val_loss = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
             losses[lr] = [train_loss, val_loss]
+            torch.save(nn, 'model/test.pth')
             # torch.save(nn, f'model/nn-{params["df"]}-{lr}.pth')
 
         plot_loss(losses, (params['df'], train_num), **params)
@@ -193,9 +186,10 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
         df = dataset.CytokineDataset(df)
         df = data.DataLoader(df, batch_size=1)
 
-        for x, y, r in df:
-            target = r[0, :, -2].detach().numpy()
-            pred = model(x).squeeze().detach().numpy()
+    for i, n in enumerate([1, 10, 11, 100, 101]):
+        x, _, r = df[n]
+        target = r[:, -11].detach().numpy()
+        pred = model(x).squeeze().detach().numpy()
 
             print(f'{target}, {pred}', file=f)
 
@@ -204,15 +198,41 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
             # axes[n-2].legend()
 
     plt.show()
-
     f.close()
 
 
+def plot_dataset(cytokine: str):
+    df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 10)])
+
+    antigen_colour = {
+        'N4': 'blue',
+        'Q4': 'orange',
+        'T4': 'green',
+        'V4': 'red',
+        'G4': 'purple',
+        'E1': 'brown',
+    }
+    concentration_colour = {
+        '100pM': '',
+        '10pM': '',
+        '100nM': ':',
+        '10nM': '-.',
+        '1nM': '--',
+        '1uM': '-',
+    }
+    t1 = df.X.iloc[df.X.index.get_level_values('Cytokine') == cytokine]
+    for index in t1.index:
+        assert(t1.loc[index].name[1] == cytokine)
+        plt.plot(t1.loc[index][:72], linestyle=concentration_colour[t1.loc[index].name[4]],
+                 color=antigen_colour[t1.loc[index].name[3]])
+
+    plt.show()
+
+
 if __name__ == '__main__':
-    train_model(filename='out/weights_all.csv', criterion='MAPE', write=False)
-
+    plot_dataset('IL-2')
+    # train_model(filename='out/weights_all.csv', criterion='MAPE', write=False)
     # plot_weights('out/weights_all.csv', file_format='png')
-
-    # model_predictions()
+    # model_predictions('model/test.pth')
 
     print('hello world!')

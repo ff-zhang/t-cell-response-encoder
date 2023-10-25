@@ -97,7 +97,7 @@ def read_pickel_files(files: Optional[list[str]] = None):
 
 
 class CytokineDataset(Dataset):
-    def __init__(self, folder: Union[str, list[str]], cytokine: list[str] = 'all', antigens: dict = None,
+    def __init__(self, folder:list[str], cytokine: list[str] = 'all', antigens: dict = None,
                  normalize: str = None):
         if cytokine != 'all':
             self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
@@ -126,14 +126,19 @@ class CytokineDataset(Dataset):
             self.antigens = antigens
         self.ident_antigen = torch.eye(len(self.antigens))
 
-        if type(folder) is str and os.path.isdir(folder):
-            self.pkl_files = glob.glob(os.path.join(folder, '*.pkl'))
-        elif type(folder) is list:
-            self.pkl_files = []
-            for name in folder:
-                self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
-        else:
-            raise TypeError
+        self.concentrations = {
+            '1uM': 1e-6,
+            '100pM': 1e-7,
+            '10pM': 1e-8,
+            '1pM': 1e-9,
+            '100nM': 1e-10,
+            '10nM': 1e-11,
+            '1nM': 1e-12,
+        }
+
+        self.pkl_files = []
+        for name in folder:
+            self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
 
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
         for k in self.dfs.keys():
@@ -148,8 +153,19 @@ class CytokineDataset(Dataset):
             )
 
             # normalize, log, and integrate the data
-            self.dfs[k] = np.log10(self.dfs[k] / np.nanmin(self.dfs[k], axis=1, keepdims=True))
-            self.dfs[k].iloc[:, 1:] = scipy.integrate.cumulative_trapezoid(x=self.dfs[k].axes[1].values, y=self.dfs[k], axis=1)
+            lod = pd.read_json([f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))][0])
+
+            self.dfs[k] = np.log10(self.dfs[k])
+            # self.dfs[k] = np.cumsum(self.dfs[k], axis=1)
+
+            for cytokine in self.classes.keys():
+                self.dfs[k].loc[self.dfs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
+
+            for conc in self.concentrations.keys():
+                self.dfs[k].loc[self.dfs[k].index.get_level_values("Concentration") == conc] -= np.log10(self.concentrations[conc])
+
+            # self.dfs[k].iloc[:, 1:] = scipy.integrate.cumulative_trapezoid(x=self.dfs[k].axes[1].values, y=self.dfs[k], axis=1)
+            self.dfs[k] = np.cumsum(self.dfs[k], axis=1)
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
