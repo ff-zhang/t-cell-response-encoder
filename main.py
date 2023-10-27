@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from scripts import dataset, model
+from scripts import dataset, model, plot
 
 LEVEL_VALUES = [
     # Data
@@ -199,34 +199,6 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
 
     plt.show()
     f.close()
-
-
-def plot_dataset(cytokine: str):
-    df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 10)])
-
-    antigen_colour = {
-        'N4': 'blue',
-        'Q4': 'orange',
-        'T4': 'green',
-        'V4': 'red',
-        'G4': 'purple',
-        'E1': 'brown',
-    }
-    concentration_colour = {
-        '100pM': '',
-        '10pM': '',
-        '100nM': ':',
-        '10nM': '-.',
-        '1nM': '--',
-        '1uM': '-',
-    }
-    t1 = df.X.iloc[df.X.index.get_level_values('Cytokine') == cytokine]
-    for index in t1.index:
-        assert(t1.loc[index].name[1] == cytokine)
-        plt.plot(t1.loc[index][:72], linestyle=concentration_colour[t1.loc[index].name[4]],
-                 color=antigen_colour[t1.loc[index].name[3]])
-
-    plt.show()
 
 
 if __name__ == '__main__':
