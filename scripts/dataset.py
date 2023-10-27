@@ -96,7 +96,7 @@ def read_pickel_files(files: Optional[list[str]] = None):
 
 
 class CytokineDataset(Dataset):
-    def __init__(self, folder:list[str], cytokine: list[str] = 'all', antigens: dict = None,
+    def __init__(self, folder: list[str], cytokine: list[str] = 'all', antigens: dict = None,
                  normalize: str = None, res_tolerance: float = 0.5):
         if cytokine != 'all':
             self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
@@ -137,9 +137,14 @@ class CytokineDataset(Dataset):
 
         self.pkl_files = []
         for name in folder:
-            self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
+            self.pkl_files.extend([f for f in glob.glob(os.path.join('../data/final', f'*{name}*.pkl'))])
+
+        assert normalize is None or normalize == 'min-max'
+        self.normalize = normalize
 
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
+        self.logs = dict()
+        self.smoothed = dict()
         self.splines = dict()
         for k in self.dfs.keys():
             # this seems unnecessary but is done in the paper for some reason
@@ -151,6 +156,9 @@ class CytokineDataset(Dataset):
                         self.dfs[k].loc[tuple(list(df_zero.iloc[row, :].name) + [df_zero.columns[t]])] = np.nan
             self.dfs[k] = self.dfs[k].interpolate(method='linear').stack('Cytokine').unstack('Time')
 
+            # to be used later in the normalization process
+            df_max = self.dfs[k].values.max()
+
             # get valid antigens and cytokines
             self.dfs[k].query(
                 ' | '.join(f'(@self.dfs[@k].index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens),
@@ -161,27 +169,26 @@ class CytokineDataset(Dataset):
                 engine='python', inplace=True
             )
 
-            # normalize, log, and integrate the data
-            lod = pd.read_json([f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))][0])
-            self.dfs[k] = np.log10(self.dfs[k])
+            # normalize and log the dataset
+            lod = pd.read_json([f for f in glob.glob(os.path.join('../data/lod', f'*{k}*.json'))][0])
+            self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
-                self.dfs[k].loc[self.dfs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
+                self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
+                if normalize == 'min-max':
+                    self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] /= (
+                            np.log10(df_max) - np.log10(lod.loc[cytokine].iloc[2])
+                    )
 
-            # Save for use in smoothing and finding spline curves later.
-            df_log = self.dfs[k].copy()
-            df_log.insert(0, 0., 0.)
-
-            self.dfs[k].iloc[:, 1: -1] = self.dfs[k].rolling(window=3, center=True, axis=1).mean().iloc[:, 1: -1]
-            self.dfs[k].insert(0, 0., 0.)
+            self.smoothed[k] = self.logs[k].copy()
+            self.smoothed[k].iloc[:, 1: -1] = self.smoothed[k].rolling(window=3, center=True, axis=1).mean().iloc[:, 1: -1]
+            self.smoothed[k].insert(0, 0., 0.)
 
             self.splines[k] = pd.DataFrame(None, index=self.dfs[k].unstack('Cytokine').index, columns=list(self.classes.keys()), dtype=object)
             for cytokine in self.splines[k].columns:
                 for row in self.splines[k].index:
-                    y = self.dfs[k].loc[tuple(list(row) + [cytokine])]
-                    r = df_log.loc[tuple(list(row) + [cytokine])]
-                    self.splines[k].loc[row, cytokine] = scipy.interpolate.UnivariateSpline(self.dfs[k].columns, y, s=res_tolerance * np.sum((y - r) ** 2))
-
-            # self.dfs[k].iloc[:, 1:] = scipy.integrate.cumulative_trapezoid(x=self.dfs[k].axes[1].values, y=self.dfs[k], axis=1)
+                    y = self.smoothed[k].loc[tuple(list(row) + [cytokine])]
+                    r = self.logs[k].loc[tuple(list(row) + [cytokine])]
+                    self.splines[k].loc[row, cytokine] = scipy.interpolate.UnivariateSpline(self.smoothed[k].columns, y, s=res_tolerance * np.sum((y - r) ** 2))
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
@@ -190,20 +197,9 @@ class CytokineDataset(Dataset):
             spline = self.splines[row[0]].loc[row[1: -1]][row[-1]]
             self.X.loc[row] = np.array([spline.integral(0, t) for t in self.X.columns])
 
-        # all that's left is to implement the paper's update_integral_features() function
-
-        self.normalize = normalize
-        assert self.normalize is None or self.normalize in ['min-max', 'std-score']
-        if normalize is not None:
-            if normalize == 'min-max':
-                self.x1 = self.X.min()
-                self.x2 = self.X.max()
-                self.X = (self.X - self.X.min()) / (self.X.max() - self.X.min())
-
-            elif normalize == 'std-score':
-                self.x1 = self.X.mean()
-                self.x2 = self.X.std()
-                self.X.iloc[:, 0: -1] = self.X.iloc[:, 0: -1].apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+        # ensures the integral is monotonic
+        for t in range(len(self.X.columns)):
+            self.X.iloc[:, t] -= np.nansum(self.X.diff(axis=1)[self.X.diff(axis=1) < 0].loc[:, self.X.columns[: t+1]], axis=1)
 
     def __len__(self):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)
@@ -254,7 +250,6 @@ class CytokineDataset(Dataset):
 
 if __name__ == '__main__':
     import os
-    from scripts import dataset
 
     params = {
         'max_epochs': 40,
@@ -265,6 +260,6 @@ if __name__ == '__main__':
 
     for n in range(2, 10):
         df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
-    df = dataset.CytokineDataset(df, normalize='min-max', cytokine=['IFNg, IL-17A'])
+    df = CytokineDataset(df, normalize='min-max', cytokine=['IFNg, IL-17A'])
 
     print('hello world!')
