@@ -137,7 +137,7 @@ class CytokineDataset(Dataset):
 
         self.pkl_files = []
         for name in folder:
-            self.pkl_files.extend([f for f in glob.glob(os.path.join('../data/final', f'*{name}*.pkl'))])
+            self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
 
         assert normalize is None or normalize == 'min-max'
         self.normalize = normalize
@@ -170,7 +170,7 @@ class CytokineDataset(Dataset):
             )
 
             # normalize and log the dataset
-            lod = pd.read_json([f for f in glob.glob(os.path.join('../data/lod', f'*{k}*.json'))][0])
+            lod = pd.read_json([f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))][0])
             self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
                 self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
@@ -181,6 +181,8 @@ class CytokineDataset(Dataset):
 
             self.smoothed[k] = self.logs[k].copy()
             self.smoothed[k].iloc[:, 1: -1] = self.smoothed[k].rolling(window=3, center=True, axis=1).mean().iloc[:, 1: -1]
+
+            self.logs[k].insert(0, 0., 0.)
             self.smoothed[k].insert(0, 0., 0.)
 
             self.splines[k] = pd.DataFrame(None, index=self.dfs[k].unstack('Cytokine').index, columns=list(self.classes.keys()), dtype=object)
@@ -197,9 +199,10 @@ class CytokineDataset(Dataset):
             spline = self.splines[row[0]].loc[row[1: -1]][row[-1]]
             self.X.loc[row] = np.array([spline.integral(0, t) for t in self.X.columns])
 
-        # ensures the integral is monotonic
+        # ensures the integral is monotonic and non-negative
         for t in range(len(self.X.columns)):
             self.X.iloc[:, t] -= np.nansum(self.X.diff(axis=1)[self.X.diff(axis=1) < 0].loc[:, self.X.columns[: t+1]], axis=1)
+        self.X[self.X <= 0.] = 0.
 
     def __len__(self):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)

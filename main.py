@@ -51,17 +51,6 @@ def plot_loss(losses, title, **kwargs):
     plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
-def get_actual_conc(df: dataset.CytokineDataset, norm_y: float) -> float:
-    if df.normalize is None:
-        raise AttributeError
-
-    if df.normalize == 'min-max':
-        return (norm_y * (df.x2 - df.x1) + df.x1)[-11]
-
-    elif df.normalize == 'std-score':
-        raise NotImplementedError
-
-
 def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """
     Calculates the mean absolute percentage difference between the input and the target.
@@ -202,9 +191,4 @@ def model_predictions(file: str = 'model/nn-1-0.001.pth'):
 
 
 if __name__ == '__main__':
-    plot_dataset('IL-2')
-    # train_model(filename='out/weights_all.csv', criterion='MAPE', write=False)
-    # plot_weights('out/weights_all.csv', file_format='png')
-    # model_predictions('model/test.pth')
-
     print('hello world!')
