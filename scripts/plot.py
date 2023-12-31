@@ -174,25 +174,24 @@ def plot_loss(losses, title, **kwargs):
     plt.savefig(f'figure/nn-{kwargs["df"]}.png')
 
 
-def plot_pred_concentration(preds: np.array, ds: data.Subset):
+def plot_pred_concentration(preds: np.array, ds: data.Subset) -> None:
     # Create a dictionary to store values for each category
     cytokine_pred = {antigen: [] for antigen in ANTIGENS}
 
-    df_plots = pd.DataFrame(
-        columns=['Antigen Name', 'Input Concentration', 'Output Concentration', 'Predicted Output']
-    )
-
+    df_plots = []
     for (x, _, r), pred in zip(ds.dataset, preds):
         antigen = np.argwhere(x.numpy() != 0.)[0][0]
         concentration = x.numpy()[antigen]
         cytokine_pred[ANTIGENS[antigen]].append([concentration, r.numpy(), pred])
 
         # We only consider the first cytokine output here (IFNg) for plotting.
-        df_plots = df_plots.append(pd.DataFrame(
-            [[ANTIGENS[antigen], concentration, pred[0], r.numpy()[0]]], columns=df_plots.columns
-        ))
+        df_plots.append([ANTIGENS[antigen], concentration, pred[0], r.numpy()[0]])
 
-    df_plots = df_plots.reset_index()
+    df_plots = pd.DataFrame(
+        df_plots,
+        columns=['Antigen Name', 'Input Concentration', 'Output Concentration', 'Predicted Output']
+    )
+    # df_plots = df_plots.reset_index()
 
     grouped_df = df_plots.groupby(['Antigen Name', 'Input Concentration']).agg({
         'Output Concentration': ['mean', 'max', 'min'],
