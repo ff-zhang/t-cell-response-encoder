@@ -7,7 +7,7 @@ import pandas as pd
 import scipy
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils import data
 
 from scripts.utils import set_standard_order
 
@@ -95,7 +95,7 @@ def read_pickel_files(files: Optional[list[str]] = None):
     return [pd.read_pickle(f) for f in files]
 
 
-class CytokineDataset(Dataset):
+class CytokineDataset(data.Dataset):
     def __init__(self, folder: list[str], cytokine: list[str] = 'all', antigens: dict = None,
                  normalize: str = None, res_tolerance: float = 0.5):
         if cytokine != 'all':
@@ -208,7 +208,7 @@ class CytokineDataset(Dataset):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)
         return self.X.shape[0] // len(self.classes)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int, min_max: tuple[float, float] = None):
         idx = idx * len(self.classes)
 
         dataset_name, tcell_count, antigen_name, concentration_name, _ = self.X.iloc[idx, :].name
@@ -227,9 +227,10 @@ class CytokineDataset(Dataset):
             (self.X.index.get_level_values('Dataset') == dataset_name) &
             (self.X.index.get_level_values('TCellNumber') == tcell_count)
         ]
-        r = r.droplevel('Dataset').droplevel('TCellNumber').to_numpy()
+        r = r.droplevel('Dataset').droplevel('TCellNumber')
 
-        return antigen_vec.float(), cytokine_measure.float(), torch.from_numpy(r).float()
+        # Returns just the values at time 64.0 because those are the only ones we care about.
+        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.get(64.).values).float()
 
     @staticmethod
     def convert_unit(c: str) -> float:
@@ -251,18 +252,14 @@ class CytokineDataset(Dataset):
         return np.log10(amount)
 
 
-if __name__ == '__main__':
-    import os
+def get_train_test_subset(params, train_per: float = 0.7, val_per: float = 0.15) -> list[data.Subset]:
+    assert np.less(train_per + val_per, 1.)
 
-    params = {
-        'max_epochs': 40,
-        'df': 'all'
-    }
+    df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' \
+        else [f'PeptideComparison_{params["df"]}']
+    df = CytokineDataset(df)
 
-    os.chdir('../')
-
-    for n in range(2, 10):
-        df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' else [f'PeptideComparison_{params["df"]}']
-    df = CytokineDataset(df, normalize='min-max', cytokine=['IFNg, IL-17A'])
-
-    print('hello world!')
+    train_num = int(train_per * len(df))
+    valid_num = int(val_per * len(df))
+    test_num = len(df) - (train_num + valid_num)
+    return data.random_split(df, [train_num, valid_num, test_num])
