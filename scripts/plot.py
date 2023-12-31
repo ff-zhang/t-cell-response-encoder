@@ -1,8 +1,28 @@
 import numpy as np
 import pandas as pd
+from torch.utils import data
+
 import matplotlib.pyplot as plt
 
-import dataset
+from scripts import dataset
+
+ANTIGENS = ['N4', 'Q4', 'T4', 'V4', 'G4', 'E1']
+ANTIGEN_COLOUR = {
+    'N4': 'blue',
+    'Q4': 'orange',
+    'T4': 'green',
+    'V4': 'red',
+    'G4': 'purple',
+    'E1': 'brown',
+}
+CONCENTRATION_LINE = {
+    '100pM': '',
+    '10pM': '',
+    '100nM': ':',
+    '10nM': '-.',
+    '1nM': '--',
+    '1uM': '-',
+}
 
 
 def plot_spline_process_steps(chosen, df_raw, df_log, df_smooth, df_spline):
@@ -76,29 +96,17 @@ def plot_spline_process_steps(chosen, df_raw, df_log, df_smooth, df_spline):
 
 
 def plot_dataset(df: dataset.CytokineDataset, cytokine: str):
-    antigen_colour = {
-        'N4': 'blue',
-        'Q4': 'orange',
-        'T4': 'green',
-        'V4': 'red',
-        'G4': 'purple',
-        'E1': 'brown',
-    }
-    concentration_colour = {
-        '100pM': '',
-        '10pM': '',
-        '100nM': ':',
-        '10nM': '-.',
-        '1nM': '--',
-        '1uM': '-',
-    }
     t1 = df.X.iloc[df.X.index.get_level_values('Cytokine') == cytokine]
     for index in t1.index:
-        assert(t1.loc[index].name[4] == cytokine)
+        assert t1.loc[index].name[4] == cytokine
         curve = t1.loc[index]
-        plt.plot(curve, linestyle=concentration_colour[t1.loc[index].name[3]],
-                 color=antigen_colour[t1.loc[index].name[2]])
+        plt.plot(
+            curve,
+            linestyle=CONCENTRATION_LINE[t1.loc[index].name[3]],
+            color=ANTIGEN_COLOUR[t1.loc[index].name[2]]
+        )
 
+    plt.tight_layout()
     plt.show()
 
 
@@ -148,7 +156,73 @@ def plot_weights(weights: str = 'out/weights.csv', file_format: str = 'pdf'):
     plt.savefig(f'figure/weights_all_error.{file_format}')
 
 
-if __name__ == '__main__':
-    df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 10)])
-    ds = 'PeptideComparison_1'
-    plot_spline_process_steps(('100k', 'N4', '10nM', 'IL-2'), df.dfs[ds], df.logs[ds], df.smoothed[ds], df.splines[ds])
+def plot_loss(losses, title, **kwargs):
+    plt.figure(figsize=(9.6, 4.8))
+
+    for lr, loss in losses.items():
+        train_loss, val_loss = loss
+        plt.plot(train_loss, label='train: ' + str(lr))
+        plt.plot(val_loss, label='val.: ' + str(lr))
+
+    plt.title(f'Dataset(s) {title[0]} - {title[1]} Points')
+
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    print(f'Saving loss to figure/nn-{kwargs["df"]}.png')
+    plt.savefig(f'figure/nn-{kwargs["df"]}.png')
+
+
+def plot_pred_concentration(preds: np.array, ds: data.Subset):
+    # Create a dictionary to store values for each category
+    cytokine_pred = {antigen: [] for antigen in ANTIGENS}
+
+    df_plots = pd.DataFrame(
+        columns=['Antigen Name', 'Input Concentration', 'Output Concentration', 'Predicted Output']
+    )
+
+    for (x, _, r), pred in zip(ds.dataset, preds):
+        antigen = np.argwhere(x.numpy() != 0.)[0][0]
+        concentration = x.numpy()[antigen]
+        cytokine_pred[ANTIGENS[antigen]].append([concentration, r.numpy(), pred])
+
+        # We only consider the first cytokine output here (IFNg) for plotting.
+        df_plots = df_plots.append(pd.DataFrame(
+            [[ANTIGENS[antigen], concentration, pred[0], r.numpy()[0]]], columns=df_plots.columns
+        ))
+
+    df_plots = df_plots.reset_index()
+
+    grouped_df = df_plots.groupby(['Antigen Name', 'Input Concentration']).agg({
+        'Output Concentration': ['mean', 'max', 'min'],
+        'Predicted Output': 'mean'
+    }).reset_index()
+    grouped_df.columns = ['Antigen Name', 'Input Concentration', 'Mean Output Concentration',
+                          'Max Output Concentration', 'Min Output Concentration',
+                          'Mean Predicted Concentration']
+    grouped_df = grouped_df[~grouped_df['Antigen Name'].isin(['E1', 'G4'])]
+
+    fig, axes = plt.subplots(nrows=1, ncols=len(grouped_df['Antigen Name'].unique()),
+                             figsize=(15, 3))
+
+    for (antigen, group), ax in zip(grouped_df.groupby('Antigen Name'), axes):
+        color = ANTIGEN_COLOUR.get(antigen, 'black')
+
+        x = group['Input Concentration']
+        y = group['Mean Output Concentration']
+
+        lower_err = y - group['Min Output Concentration']
+        upper_err = group['Max Output Concentration'] - y
+        y_err = [lower_err, upper_err]
+
+        ax.errorbar(x, y, yerr=y_err, fmt='o', label=antigen, color=color, capsize=5, alpha=0.2)
+        ax.scatter(group['Input Concentration'], group['Mean Predicted Concentration'], color=color)
+
+        ax.set_xlabel('Concentration')
+        ax.set_xticks([-11., -10., -9., -8., -7., -6.])
+        ax.set_ylabel('[Cytokine 1] Raw & Predicted Avg')
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
