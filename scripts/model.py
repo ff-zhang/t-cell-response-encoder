@@ -1,23 +1,31 @@
 import time
+from pathlib import Path
 from tqdm import tqdm
 
 import numpy as np
 import torch
 from torch import nn
+from torch.utils import data
 
 
 class CytokineModel(nn.Module):
-    def __init__(self, input: int, hidden: int, output: int) -> None:
+    """
+    Model for the internal process of a T-cell using two hidden layers.
+    """
+    def __init__(self, input: int = 6, h1: int = 4, h2: int = 2, output: int = 5) -> None:
         super(CytokineModel, self).__init__()
 
-        self.fc1 = nn.Linear(input, hidden)
+        self.fc1a = nn.Linear(input, h1)
+        self.fc1b = nn.Linear(h1, h2)
+        # GeLU
         self.ac1 = nn.Sigmoid()
 
-        self.fc2 = nn.Linear(hidden, output)
-        self.ac2 = nn.ReLU()
+        self.fc2 = nn.Linear(h2, output)
+        # nn.softplus
+        self.ac2 = nn.Softplus()
 
         self.main = nn.Sequential(
-            self.fc1, self.ac1, self.fc2, self.ac2
+            self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc2, self.ac2
         )
 
     def forward(self, x):
@@ -35,12 +43,12 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
     for epoch in tqdm(range(kwargs['max_epochs'])):
         train_loss, val_loss = 0, 0
 
+        # Note that only the entry at 64.0 hours is given here.
         for x, _, r in train_loader:
             optimizer.zero_grad()
 
             outputs = model(x.to(device))
-            # gets the entry at 72 hours
-            loss = criterion(outputs.squeeze(), r[:, :, -11].to(device))
+            loss = criterion(outputs.squeeze(), r.to(device))
             loss.backward()
             optimizer.step()
 
@@ -49,14 +57,30 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
         with torch.no_grad():
             for x, _, r in validation_loader:
                 outputs = model(x.to(device))
-                loss = criterion(outputs.squeeze(), r[:, :, -11].to(device))
+                loss = criterion(outputs.squeeze(), r.to(device))
                 val_loss += loss.item()
 
         train_history[epoch] = train_loss / len(train_loader.dataset)
         val_history[epoch] = val_loss / len(validation_loader.dataset)
+
+        if kwargs['save'] and not (epoch + 1) % 5:
+            # Only tested when using the Adam optimizer.
+            path = Path(f'model/nn-{optimizer.param_groups[0]["lr"]}-{kwargs["df"]}')
+            if not path.exists():
+                Path.mkdir(path, exist_ok=True)
+            torch.save(model, path / f'eph-{epoch + 1}.pth')
 
     e = time.time()
 
     print(f'\tTraining time: {round(e - s, 5)} seconds\n')
 
     return train_history, val_history
+
+
+def evaluate(model: nn.Module, loader: data.DataLoader) -> np.array:
+    pred = []
+    with torch.no_grad():
+        for x, y, r in loader:
+            pred.append(model(x).squeeze().detach().numpy())
+
+    return np.array(pred)
