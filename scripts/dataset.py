@@ -97,7 +97,7 @@ def read_pickel_files(files: Optional[list[str]] = None):
 
 class CytokineDataset(data.Dataset):
     def __init__(self, folder: list[str], cytokine: list[str] = 'all', antigens: dict = None,
-                 normalize: str = None, res_tolerance: float = 0.5):
+                 norm: str = None, res_tolerance: float = 0.5):
         if cytokine != 'all':
             self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
         else:
@@ -139,8 +139,9 @@ class CytokineDataset(data.Dataset):
         for name in folder:
             self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
 
-        assert normalize is None or normalize == 'min-max'
-        self.normalize = normalize
+        assert norm is None or norm == 'min-max'
+        self.norm = norm
+        self.x_min, self.x_max = -np.inf, np.max
 
         self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
         self.logs = dict()
@@ -174,7 +175,7 @@ class CytokineDataset(data.Dataset):
             self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
                 self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
-                if normalize == 'min-max':
+                if norm == 'min-max':
                     self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] /= (
                             np.log10(df_max) - np.log10(lod.loc[cytokine].iloc[2])
                     )
@@ -213,10 +214,8 @@ class CytokineDataset(data.Dataset):
 
         dataset_name, tcell_count, antigen_name, concentration_name, _ = self.X.iloc[idx, :].name
 
-        concentration = self.convert_unit(concentration_name)
-
         antigen = self.antigens[antigen_name]
-        antigen_vec = self.ident_antigen[antigen] * concentration
+        antigen_vec = self.ident_antigen[antigen] * self.convert_unit(concentration_name)
 
         cytokine_measure = self.X.iloc[idx, :].to_numpy()
         cytokine_measure = torch.from_numpy(cytokine_measure)
@@ -259,7 +258,6 @@ def get_train_test_subset(params, train_per: float = 0.7, val_per: float = 0.15)
         else [f'PeptideComparison_{params["df"]}']
     df = CytokineDataset(df)
 
-    train_num = int(train_per * len(df))
-    valid_num = int(val_per * len(df))
+    train_num, valid_num = int(train_per * len(df)), int(val_per * len(df))
     test_num = len(df) - (train_num + valid_num)
     return data.random_split(df, [train_num, valid_num, test_num])
