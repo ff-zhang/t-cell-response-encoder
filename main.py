@@ -24,7 +24,7 @@ LEVEL_VALUES = [
 ]
 
 params = {
-    'max_epochs': 100,
+    'max_epochs': 200,
     'df': 'all',
     'save': True,
 }
@@ -50,7 +50,7 @@ def train_model(datasets: list[data.Subset], filename=None, criterion=None, writ
 
     print(f'Training on dataset {params["df"]} with {len(train_set)} points ({torch.seed()})\n')
 
-    learn_rates = [0.1, 0.01, 0.001]
+    learn_rates = [0.005, 0.001, 0.0005, 0.0001]
     for _ in range(1):
         train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True)
         val_loader = data.DataLoader(val_set, batch_size=1, shuffle=True)
@@ -61,7 +61,7 @@ def train_model(datasets: list[data.Subset], filename=None, criterion=None, writ
 
         for lr in learn_rates:
             print(f'\tlearning rate : {lr}')
-            nn = model.CytokineModel()
+            nn = model.CytokineModel(h1=128, h2=16)
 
             if criterion == 'MAPE':
                 criterion = MAPE_loss
@@ -89,11 +89,16 @@ if __name__ == '__main__':
         df = dataset.CytokineDataset([f])
         plot.plot_dataset(df, 'IL-17A')
 
-    dfs = dataset.get_train_test_subset(params)
+    df = (dfs := dataset.get_train_test_subset(params))[0].dataset
+    df.x_min, df.x_max = df.X.iloc[dfs[0].indices].min(), df.X.iloc[dfs[0].indices].max()
+
+    # Normalize the dataset to be in the interval [-1, 1].
+    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
+
     train_model(dfs)
 
     # Load the manually saved trained model which trained using the fixed seed.
-    nn = torch.load('model/good-nn-0.01-all/eph-60.pth')
+    nn = torch.load('model/nn-0.0005-all/eph-100.pth')
     preds = model.evaluate(nn, data.DataLoader(dfs[0], batch_size=1, shuffle=True))
     plot.plot_pred_concentration(preds, dfs[0])
 

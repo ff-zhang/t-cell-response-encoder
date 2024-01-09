@@ -191,7 +191,6 @@ def plot_pred_concentration(preds: np.array, ds: data.Subset) -> None:
         df_plots,
         columns=['Antigen Name', 'Input Concentration', 'Output Concentration', 'Predicted Output']
     )
-    # df_plots = df_plots.reset_index()
 
     grouped_df = df_plots.groupby(['Antigen Name', 'Input Concentration']).agg({
         'Output Concentration': ['mean', 'max', 'min'],

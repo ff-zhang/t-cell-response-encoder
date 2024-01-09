@@ -12,20 +12,24 @@ class CytokineModel(nn.Module):
     """
     Model for the internal process of a T-cell using two hidden layers.
     """
-    def __init__(self, input: int = 6, h1: int = 4, h2: int = 2, output: int = 5) -> None:
+    def __init__(self, input: int = 6, h1: int = 4, h2: int = 5, output: int = 5):
         super(CytokineModel, self).__init__()
 
         self.fc1a = nn.Linear(input, h1)
-        self.fc1b = nn.Linear(h1, h2)
+        self.fc1b = nn.Linear(h1, h1)
+        self.fc1c = nn.Linear(h1, h1)
+        self.fc1d = nn.Linear(h1, 2)
         # GeLU
         self.ac1 = nn.Sigmoid()
 
-        self.fc2 = nn.Linear(h2, output)
+        self.fc2a = nn.Linear(2, h2)
+        self.fc2b = nn.Linear(h2, output)
         # nn.softplus
         self.ac2 = nn.Softplus()
 
         self.main = nn.Sequential(
-            self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc2, self.ac2
+            self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc1c, self.ac1, self.fc1d, self.ac1,
+            self.fc2a, self.ac1, self.fc2b
         )
 
     def forward(self, x):
@@ -40,6 +44,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
     model = model.to(device)
 
     s = time.time()
+    model.train()
     for epoch in tqdm(range(kwargs['max_epochs'])):
         train_loss, val_loss = 0, 0
 
@@ -71,7 +76,6 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
             torch.save(model, path / f'eph-{epoch + 1}.pth')
 
     e = time.time()
-
     print(f'\tTraining time: {round(e - s, 5)} seconds\n')
 
     return train_history, val_history
@@ -79,6 +83,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
 def evaluate(model: nn.Module, loader: data.DataLoader) -> np.array:
     pred = []
+    model.eval()
     with torch.no_grad():
         for x, y, r in loader:
             pred.append(model(x).squeeze().detach().numpy())
