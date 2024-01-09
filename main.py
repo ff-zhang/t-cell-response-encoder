@@ -1,8 +1,6 @@
 import torch
 from torch.utils import data
-
-import numpy as np
-import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
 
 from scripts import dataset, model, plot
 
@@ -37,7 +35,7 @@ def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs((target - input) / target))
 
 
-def train_model(datasets: list[data.Subset], filename=None, criterion=None, write=False):
+def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criterion=None, write=False):
     if write is True and filename is None:
         raise FileNotFoundError
 
@@ -45,38 +43,35 @@ def train_model(datasets: list[data.Subset], filename=None, criterion=None, writ
         f = open(filename, 'w')
         f.close()
 
-    assert len(datasets) == 3
-    train_set, val_set, test_set = datasets
+    print(f'Training on dataset {params["df"]} with {len(df)} points ({torch.seed()})\n')
 
-    print(f'Training on dataset {params["df"]} with {len(train_set)} points ({torch.seed()})\n')
+    losses = {}
 
-    learn_rates = [0.005, 0.001, 0.0005, 0.0001]
-    for _ in range(1):
-        train_loader = data.DataLoader(train_set, batch_size=1, shuffle=True)
-        val_loader = data.DataLoader(val_set, batch_size=1, shuffle=True)
+    for i, (train_index, test_index) in enumerate(kfold.split(df)):
+        print(f'\t-------- Fold {i + 1} --------')
 
-        print(f'-------------------- Iter. {_} --------------------')
-
-        losses = {}
-
+        learn_rates = [0.01, 0.005, 0.001, 0.0005, 0.0001]
         for lr in learn_rates:
-            print(f'\tlearning rate : {lr}')
-            nn = model.CytokineModel(h1=128, h2=16)
+            print(f'Learning rate : {lr}')
 
+            train_loader = data.DataLoader(data.Subset(df, train_index), batch_size=2, shuffle=True)
+            test_loader = data.DataLoader(data.Subset(df, test_index), batch_size=2, shuffle=True)
+
+            nn = model.CytokineModel(h1=128, h2=16)
             if criterion == 'MAPE':
                 criterion = MAPE_loss
             else:
                 criterion = torch.nn.MSELoss('mean')
             optimizer = torch.optim.Adam(nn.parameters(), lr)
 
-            losses[lr] = model.train(nn, train_loader, val_loader, criterion, optimizer, **params)
+            losses[lr] = model.train(nn, train_loader, test_loader, criterion, optimizer, **params)
 
-        plot.plot_loss(losses, (params['df'], len(train_set)), **params)
+        plot.plot_loss(losses, (params['df'], i + 1))
 
-        if write:
-            with open(filename, 'a') as f:
-                f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
-                f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
+    if write:
+        with open(filename, 'a') as f:
+            f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
+            f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
 
 
 if __name__ == '__main__':
@@ -89,17 +84,12 @@ if __name__ == '__main__':
         df = dataset.CytokineDataset([f])
         plot.plot_dataset(df, 'IL-17A')
 
-    df = (dfs := dataset.get_train_test_subset(params))[0].dataset
-    df.x_min, df.x_max = df.X.iloc[dfs[0].indices].min(), df.X.iloc[dfs[0].indices].max()
-
-    # Normalize the dataset to be in the interval [-1, 1].
-    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
-
-    train_model(dfs)
+    df, kf = dataset.get_kfold_dataset(params)
+    train_model(df, kf)
 
     # Load the manually saved trained model which trained using the fixed seed.
     nn = torch.load('model/nn-0.0005-all/eph-100.pth')
-    preds = model.evaluate(nn, data.DataLoader(dfs[0], batch_size=1, shuffle=True))
-    plot.plot_pred_concentration(preds, dfs[0])
+    preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
+    plot.plot_pred_concentration(preds, df)
 
     print('hello world!')

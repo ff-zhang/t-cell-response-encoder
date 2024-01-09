@@ -156,7 +156,7 @@ def plot_weights(weights: str = 'out/weights.csv', file_format: str = 'pdf'):
     plt.savefig(f'figure/weights_all_error.{file_format}')
 
 
-def plot_loss(losses, title, **kwargs):
+def plot_loss(losses, title):
     plt.figure(figsize=(9.6, 4.8))
 
     for lr, loss in losses.items():
@@ -164,22 +164,21 @@ def plot_loss(losses, title, **kwargs):
         plt.plot(train_loss, label='train: ' + str(lr))
         plt.plot(val_loss, label='val.: ' + str(lr))
 
-    plt.title(f'Dataset(s) {title[0]} - {title[1]} Points')
+    plt.title(f'Dataset(s) {title[0]} - Fold {title[1]}')
 
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
 
-    print(f'Saving loss to figure/nn-{kwargs["df"]}.png')
-    plt.savefig(f'figure/nn-{kwargs["df"]}.png')
+    plt.show()
 
 
-def plot_pred_concentration(preds: np.array, ds: data.Subset) -> None:
+def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> None:
     # Create a dictionary to store values for each category
     cytokine_pred = {antigen: [] for antigen in ANTIGENS}
 
     df_plots = []
-    for (x, _, r), pred in zip(ds.dataset, preds):
+    for (x, _, r), pred in zip(list(ds[i] for i in range(len(ds))), preds):
         antigen = np.argwhere(x.numpy() != 0.)[0][0]
         concentration = x.numpy()[antigen]
         cytokine_pred[ANTIGENS[antigen]].append([concentration, r.numpy(), pred])

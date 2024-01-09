@@ -166,13 +166,16 @@ class CytokineDataset(data.Dataset):
         return np.log10(amount)
 
 
-def get_train_test_subset(params, train_per: float = 0.7, val_per: float = 0.15) -> list[data.Subset]:
+def get_kfold_dataset(params, train_per: float = 0.7, val_per: float = 0.15, n_splits=6) -> tuple[CytokineDataset, KFold]:
     assert np.less(train_per + val_per, 1.)
 
     df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' \
         else [f'PeptideComparison_{params["df"]}']
     df = CytokineDataset(df)
 
-    train_num, valid_num = int(train_per * len(df)), int(val_per * len(df))
-    test_num = len(df) - (train_num + valid_num)
-    return data.random_split(df, [train_num, valid_num, test_num])
+    # Normalize the dataset to be in the interval [-1, 1].
+    df.x_min, df.x_max = df.X.min(), df.X.max()
+    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
+
+    # The number of folds is 6 by default because it evenly divides the length of the full dataset.
+    return df, KFold(n_splits=n_splits, shuffle=True, random_state=torch.seed() >> 32)
