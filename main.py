@@ -90,8 +90,22 @@ if __name__ == '__main__':
     train_model(df, kf)
 
     # Load the manually saved trained model which trained using the fixed seed.
-    nn = torch.load('model/nn-0.0005-all/eph-100.pth')
-    preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
-    plot.plot_pred_concentration(preds, df)
+    nn = torch.load('model/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-80.pth')
+
+    import matplotlib.pyplot as plt
+
+    nn.eval()
+    with torch.no_grad():
+        for n in [10, 21, 42, 66]:
+            x, y, r = df[n]
+            pred = nn(x)
+            pred = torch.reshape(pred, (5, 45)).detach().numpy()
+            r = r.detach().numpy()
+            for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
+                plt.plot(pred.T[:, i], color=c)
+                plt.plot(r.T[:, i], alpha=0.5, color=c)
+
+            plt.title(f'Target and Prediction ({n})')
+            plt.show()
 
     print('hello world!')
