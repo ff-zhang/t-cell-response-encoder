@@ -19,17 +19,16 @@ class CytokineModel(nn.Module):
         self.fc1b = nn.Linear(h1, h1)
         self.fc1c = nn.Linear(h1, h1)
         self.fc1d = nn.Linear(h1, 2)
-        # GeLU
-        self.ac1 = nn.Sigmoid()
 
         self.fc2a = nn.Linear(2, h2)
         self.fc2b = nn.Linear(h2, output)
-        # nn.softplus
-        self.ac2 = nn.Softplus()
+
+        # GeLU
+        self.ac1 = nn.Softplus()
 
         self.main = nn.Sequential(
-            self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc1c, self.ac1, self.fc1d, self.ac1,
-            self.fc2a, self.ac1, self.fc2b
+            self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc1c, self.ac1, self.fc1d,
+            self.ac1, self.fc2a, self.ac1, self.fc2b
         )
 
     def forward(self, x):
@@ -50,6 +49,8 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
         # Note that only the entry at 64.0 hours is given here.
         for x, _, r in train_loader:
+            r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
+
             optimizer.zero_grad()
 
             outputs = model(x.to(device))
@@ -61,6 +62,8 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
         with torch.no_grad():
             for x, _, r in validation_loader:
+                r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
+
                 outputs = model(x.to(device))
                 loss = criterion(outputs.squeeze(), r.to(device))
                 val_loss += loss.item()

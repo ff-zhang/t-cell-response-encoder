@@ -144,7 +144,7 @@ class CytokineDataset(data.Dataset):
         r = r.droplevel('Dataset').droplevel('TCellNumber')
 
         # Returns just the values at time 64.0 because those are the only ones we care about.
-        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.get(64.).values).float()
+        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 45].to_numpy()).float()
 
     @staticmethod
     def convert_unit(c: str) -> float:
@@ -170,7 +170,7 @@ def get_kfold_dataset(params, train_per: float = 0.7, val_per: float = 0.15, n_s
     assert np.less(train_per + val_per, 1.)
 
     df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' \
-        else [f'PeptideComparison_{params["df"]}']
+        else [f'PeptideComparison_{i}' for i in params["df"]]
     df = CytokineDataset(df)
 
     # Normalize the dataset to be in the interval [-1, 1].

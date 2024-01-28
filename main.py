@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.utils import data
 from sklearn.model_selection import KFold
@@ -23,7 +24,7 @@ LEVEL_VALUES = [
 
 params = {
     'max_epochs': 200,
-    'df': 'all',
+    'df': [i for i in range(1, 7)],
     'save': True,
 }
 
@@ -48,16 +49,16 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criter
     losses = {}
 
     for i, (train_index, test_index) in enumerate(kfold.split(df)):
-        print(f'\t-------- Fold {i + 1} --------')
+        print(f'---------------- Fold {i + 1} ----------------')
 
-        learn_rates = [0.01, 0.005, 0.001, 0.0005, 0.0001]
+        learn_rates = [0.005, 0.001, 0.0005, 0.0001]
         for lr in learn_rates:
-            print(f'Learning rate : {lr}')
+            print(f'\tLearning rate : {lr}')
 
             train_loader = data.DataLoader(data.Subset(df, train_index), batch_size=2, shuffle=True)
             test_loader = data.DataLoader(data.Subset(df, test_index), batch_size=2, shuffle=True)
 
-            nn = model.CytokineModel(h1=128, h2=16)
+            nn = model.CytokineModel(h1=128, h2=16, output=5 * 45)
             if criterion == 'MAPE':
                 criterion = MAPE_loss
             else:
@@ -76,6 +77,7 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criter
 
 if __name__ == '__main__':
     # PyTorch seed for a nice training and testing dataset,
+    np.random.seed(0)
     torch.manual_seed(5667615556836105505)
 
     df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 7)])
@@ -84,7 +86,7 @@ if __name__ == '__main__':
         df = dataset.CytokineDataset([f])
         plot.plot_dataset(df, 'IL-17A')
 
-    df, kf = dataset.get_kfold_dataset(params)
+    df, kf = dataset.get_kfold_dataset(params, n_splits=4)
     train_model(df, kf)
 
     # Load the manually saved trained model which trained using the fixed seed.
