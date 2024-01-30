@@ -179,6 +179,7 @@ def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> Non
 
     df_plots = []
     for (x, _, r), pred in zip(list(ds[i] for i in range(len(ds))), preds):
+        r = r[:, -1]
         antigen = np.argwhere(x.numpy() != 0.)[0][0]
         concentration = x.numpy()[antigen]
         cytokine_pred[ANTIGENS[antigen]].append([concentration, r.numpy(), pred])
@@ -200,26 +201,30 @@ def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> Non
                           'Mean Predicted Concentration']
     grouped_df = grouped_df[~grouped_df['Antigen Name'].isin(['E1', 'G4'])]
 
-    fig, axes = plt.subplots(nrows=1, ncols=len(grouped_df['Antigen Name'].unique()),
-                             figsize=(15, 3))
+    try:
+        fig, axes = plt.subplots(nrows=1, ncols=len(grouped_df['Antigen Name'].unique()),
+                                 figsize=(15, 3))
 
-    for (antigen, group), ax in zip(grouped_df.groupby('Antigen Name'), axes):
-        color = ANTIGEN_COLOUR.get(antigen, 'black')
+        for (antigen, group), ax in zip(grouped_df.groupby('Antigen Name'), axes):
+            color = ANTIGEN_COLOUR.get(antigen, 'black')
 
-        x = group['Input Concentration']
-        y = group['Mean Output Concentration']
+            x = group['Input Concentration']
+            y = group['Mean Output Concentration']
 
-        lower_err = y - group['Min Output Concentration']
-        upper_err = group['Max Output Concentration'] - y
-        y_err = [lower_err, upper_err]
+            lower_err = y - group['Min Output Concentration']
+            upper_err = group['Max Output Concentration'] - y
+            y_err = [lower_err, upper_err]
 
-        ax.errorbar(x, y, yerr=y_err, fmt='o', label=antigen, color=color, capsize=5, alpha=0.2)
-        ax.scatter(group['Input Concentration'], group['Mean Predicted Concentration'], color=color)
+            ax.errorbar(x, y, yerr=y_err, fmt='o', label=antigen, color=color, capsize=5, alpha=0.2)
+            ax.scatter(group['Input Concentration'], group['Mean Predicted Concentration'], color=color)
 
-        ax.set_xlabel('Concentration')
-        ax.set_xticks([-11., -10., -9., -8., -7., -6.])
-        ax.set_ylabel('[Cytokine 1] Raw & Predicted Avg')
-        ax.legend()
+            ax.set_xlabel('Concentration')
+            ax.set_xticks([-11., -10., -9., -8., -7., -6.])
+            ax.set_ylabel('[Cytokine 1] Raw & Predicted Avg')
+            ax.legend()
 
-    plt.tight_layout()
-    plt.show()
+        plt.tight_layout()
+        plt.show()
+
+    except ValueError:
+        pass

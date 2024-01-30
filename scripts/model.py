@@ -12,8 +12,11 @@ class CytokineModel(nn.Module):
     """
     Model for the internal process of a T-cell using two hidden layers.
     """
-    def __init__(self, input: int = 6, h1: int = 4, h2: int = 5, output: int = 5):
+    def __init__(self, input: int = 6, h1: int = 8, h2: int = 5, pred: str = 'point'):
         super(CytokineModel, self).__init__()
+
+        assert pred in ['point', 'series']
+        self.pred = pred
 
         self.fc1a = nn.Linear(input, h1)
         self.fc1b = nn.Linear(h1, h1)
@@ -21,10 +24,13 @@ class CytokineModel(nn.Module):
         self.fc1d = nn.Linear(h1, 2)
 
         self.fc2a = nn.Linear(2, h2)
-        self.fc2b = nn.Linear(h2, output)
+        # The length of the time series to predict is hard-coded here.
+        self.fc2b = nn.Linear(h2, 5 if pred == 'point' else 5 * 52)
 
         # GeLU
         self.ac1 = nn.Softplus()
+        # nn.softplus
+        self.ac2 = nn.Softplus()
 
         self.main = nn.Sequential(
             self.fc1a, self.ac1, self.fc1b, self.ac1, self.fc1c, self.ac1, self.fc1d,
@@ -49,7 +55,10 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
         # Note that only the entry at 64.0 hours is given here.
         for x, _, r in train_loader:
-            r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
+            if model.pred == 'point':
+                r = r[:, :, -1]
+            elif model.pred == 'series':
+                r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
 
             optimizer.zero_grad()
 
@@ -62,7 +71,10 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
         with torch.no_grad():
             for x, _, r in validation_loader:
-                r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
+                if model.pred == 'point':
+                    r = r[:, :, -1]
+                elif model.pred == 'series':
+                    r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
 
                 outputs = model(x.to(device))
                 loss = criterion(outputs.squeeze(), r.to(device))
@@ -73,7 +85,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
 
         if kwargs['save'] and not (epoch + 1) % 5:
             # Only tested when using the Adam optimizer.
-            path = Path(f'model/nn-{optimizer.param_groups[0]["lr"]}-{kwargs["df"]}')
+            path = Path(f'model/{model.pred}/nn-{optimizer.param_groups[0]["lr"]}-{kwargs["df"]}')
             if not path.exists():
                 Path.mkdir(path, exist_ok=True)
             torch.save(model, path / f'eph-{epoch + 1}.pth')

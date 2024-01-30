@@ -144,7 +144,7 @@ class CytokineDataset(data.Dataset):
         r = r.droplevel('Dataset').droplevel('TCellNumber')
 
         # Returns just the values at time 64.0 because those are the only ones we care about.
-        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 45].to_numpy()).float()
+        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 52].to_numpy()).float()
 
     @staticmethod
     def convert_unit(c: str) -> float:

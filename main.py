@@ -23,9 +23,10 @@ LEVEL_VALUES = [
 ]
 
 params = {
-    'max_epochs': 200,
+    'max_epochs': 150,
     'df': [i for i in range(1, 7)],
     'save': True,
+    'learning_rate': [0.005, 0.001, 0.0005, 0.0001],
 }
 
 
@@ -36,11 +37,12 @@ def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs((target - input) / target))
 
 
-def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criterion=None, write=False):
-    if write is True and filename is None:
-        raise FileNotFoundError
-
+def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series', filename: str = None,
+                criterion: str = None, write: bool = False):
     if write:
+        if filename is None:
+            raise FileNotFoundError
+
         f = open(filename, 'w')
         f.close()
 
@@ -51,14 +53,13 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criter
     for i, (train_index, test_index) in enumerate(kfold.split(df)):
         print(f'---------------- Fold {i + 1} ----------------')
 
-        learn_rates = [0.005, 0.001, 0.0005, 0.0001]
-        for lr in learn_rates:
+        for lr in params['learning_rate']:
             print(f'\tLearning rate : {lr}')
 
-            train_loader = data.DataLoader(data.Subset(df, train_index), batch_size=2, shuffle=True)
-            test_loader = data.DataLoader(data.Subset(df, test_index), batch_size=2, shuffle=True)
+            train_loader = data.DataLoader(data.Subset(df, train_index), batch_size=4, shuffle=True)
+            test_loader = data.DataLoader(data.Subset(df, test_index), batch_size=4, shuffle=True)
 
-            nn = model.CytokineModel(h1=128, h2=16, output=5 * 45)
+            nn = model.CytokineModel(h1=32, h2=6, pred=pred)
             if criterion == 'MAPE':
                 criterion = MAPE_loss
             else:
@@ -76,30 +77,32 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, filename=None, criter
 
 
 if __name__ == '__main__':
-    # PyTorch seed for a nice training and testing dataset,
+    import matplotlib.pyplot as plt
+
+    # Fix the seed for repeatability in training and testing.
     np.random.seed(0)
     torch.manual_seed(5667615556836105505)
 
     df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 7)])
+
+    # Visualize the dataset after all pre-processing has been performed.
     plot.plot_dataset(df, 'IL-17A')
     for f in [f'PeptideComparison_{i}' for i in range(7, 10)]:
         df = dataset.CytokineDataset([f])
         plot.plot_dataset(df, 'IL-17A')
 
+    # Just train the models on the nice datasets.
     df, kf = dataset.get_kfold_dataset(params, n_splits=4)
-    train_model(df, kf)
+    train_model(df, kf, pred='series')
+    train_model(df, kf, pred='point')
 
-    # Load the manually saved trained model which trained using the fixed seed.
-    nn = torch.load('model/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-80.pth')
-
-    import matplotlib.pyplot as plt
-
+    nn = torch.load('model/series/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-120.pth')
     nn.eval()
     with torch.no_grad():
         for n in [10, 21, 42, 66]:
             x, y, r = df[n]
             pred = nn(x)
-            pred = torch.reshape(pred, (5, 45)).detach().numpy()
+            pred = torch.reshape(pred, (5, 52)).detach().numpy()
             r = r.detach().numpy()
             for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
                 plt.plot(pred.T[:, i], color=c)
@@ -107,5 +110,34 @@ if __name__ == '__main__':
 
             plt.title(f'Target and Prediction ({n})')
             plt.show()
+
+    nn = torch.load('model/point/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-80.pth')
+    preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
+    plot.plot_pred_concentration(preds, df)
+
+    # Train the models on all available data.
+    params['df'] = 'all'
+    df, kf = dataset.get_kfold_dataset(params, n_splits=6)
+    train_model(df, kf, pred='series')
+    train_model(df, kf, pred='point')
+
+    nn = torch.load('model/series/nn-0.001-all/eph-120.pth')
+    nn.eval()
+    with torch.no_grad():
+        for n in [10, 21, 42, 66]:
+            x, y, r = df[n]
+            pred = nn(x)
+            pred = torch.reshape(pred, (5, 52)).detach().numpy()
+            r = r.detach().numpy()
+            for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
+                plt.plot(pred.T[:, i], color=c)
+                plt.plot(r.T[:, i], alpha=0.5, color=c)
+
+            plt.title(f'Target and Prediction ({n})')
+            plt.show()
+
+    nn = torch.load('model/point/nn-0.001-all/eph-80.pth')
+    preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
+    plot.plot_pred_concentration(preds, df)
 
     print('hello world!')
