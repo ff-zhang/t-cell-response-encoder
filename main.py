@@ -24,7 +24,7 @@ LEVEL_VALUES = [
 
 params = {
     'max_epochs': 150,
-    'df': [i for i in range(1, 7)],
+    'df': 'all',
     'save': True,
     'learning_rate': [0.005, 0.001, 0.0005, 0.0001],
 }
@@ -70,8 +70,6 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series',
 
         plot.plot_loss(losses, (params['df'], i + 1))
 
-        break
-
     if write:
         with open(filename, 'a') as f:
             f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
@@ -103,45 +101,20 @@ if __name__ == '__main__':
     # Get the k-folds of the dataset.
     train_per = 0.7
     val_per = 0.15
-    n_splits = 6
+    n_splits = 4
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=torch.seed() >> 32)
 
-    # Train the model.
-    train_model(df, kf, pred='series')
-    train_model(df, kf, pred='point')
-
-    nn = torch.load('model/series/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-120.pth')
-    nn.eval()
-    with torch.no_grad():
-        for n in [10, 21, 42, 66]:
-            x, y, r = df[n]
-            pred = nn(x)
-            pred = torch.reshape(pred, (5, 52)).detach().numpy()
-            r = r.detach().numpy()
-            for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
-                plt.plot(pred.T[:, i], color=c)
-                plt.plot(r.T[:, i], alpha=0.5, color=c)
-
-            plt.title(f'Target and Prediction ({n})')
-            plt.show()
-
-    nn = torch.load('model/point/nn-0.001-[1, 2, 3, 4, 5, 6]/eph-80.pth')
-    preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
-    plot.plot_pred_concentration(preds, df)
-
     # Train the models on all available data.
-    params['df'] = 'all'
-    df, kf = dataset.get_kfold_dataset(params, n_splits=6)
     train_model(df, kf, pred='series')
     train_model(df, kf, pred='point')
 
-    nn = torch.load('model/series/nn-0.0005-all/eph-80.pth')
+    nn = torch.load('model/series/nn-0.0005-all/eph-40.pth')
     nn.eval()
     with torch.no_grad():
         for n in [10, 42, 66, 101, 123, 148, 200]:
             x, y, r = df[n]
             pred = nn(x)
-            pred = torch.reshape(pred, (5, 52)).detach().numpy()
+            pred = torch.reshape(pred, (5, 30)).detach().numpy()
             r = r.detach().numpy()
             for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
                 plt.plot(pred.T[:, i], color=c)
