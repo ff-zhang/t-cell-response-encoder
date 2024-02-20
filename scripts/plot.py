@@ -18,8 +18,11 @@ ANTIGEN_COLOUR = {
 CONCENTRATION_LINE = {
     '100pM': '',
     '10pM': '',
+    '300nM': '',
     '100nM': ':',
+    '30nM': '',
     '10nM': '-.',
+    '3nM': '',
     '1nM': '--',
     '1uM': '-',
 }
@@ -97,13 +100,14 @@ def plot_spline_process_steps(chosen, df_raw, df_log, df_smooth, df_spline):
 
 def plot_dataset(df: dataset.CytokineDataset, cytokine: str):
     t1 = df.X.iloc[df.X.index.get_level_values('Cytokine') == cytokine]
+    antigen = np.flatnonzero(np.array(t1.index.names) == 'Peptide')
+    concentration = np.flatnonzero(np.array(t1.index.names) == 'Concentration')
+    assert antigen.size != 0 and concentration.size != 0
     for index in t1.index:
-        assert t1.loc[index].name[4] == cytokine
-        curve = t1.loc[index]
         plt.plot(
-            curve,
-            linestyle=CONCENTRATION_LINE[t1.loc[index].name[3]],
-            color=ANTIGEN_COLOUR[t1.loc[index].name[2]]
+            t1.loc[index],
+            linestyle=CONCENTRATION_LINE[t1.loc[index].name[concentration[0]]],
+            color=ANTIGEN_COLOUR[t1.loc[index].name[antigen[0]]]
         )
 
     plt.tight_layout()

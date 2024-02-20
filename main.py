@@ -70,6 +70,8 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series',
 
         plot.plot_loss(losses, (params['df'], i + 1))
 
+        break
+
     if write:
         with open(filename, 'a') as f:
             f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
@@ -83,16 +85,28 @@ if __name__ == '__main__':
     np.random.seed(0)
     torch.manual_seed(5667615556836105505)
 
-    df = dataset.CytokineDataset([f'PeptideComparison_{i}' for i in range(1, 7)])
-
-    # Visualize the dataset after all pre-processing has been performed.
-    plot.plot_dataset(df, 'IL-17A')
+    # Visualize subsets of the dataset after all pre-processing has been performed.
     for f in [f'PeptideComparison_{i}' for i in range(7, 10)]:
-        df = dataset.CytokineDataset([f])
+        df = dataset.CytokineDataset(files=[f])
         plot.plot_dataset(df, 'IL-17A')
 
-    # Just train the models on the nice datasets.
-    df, kf = dataset.get_kfold_dataset(params, n_splits=4)
+    datasets = [f'PeptideComparison_{i}' for i in range(1, 10)]
+    datasets.extend(['TCellNumber_1', 'TCellNumber_3', 'Activation_1', 'Activation_3',
+                     'HighMI_1-1', 'HighMI_1-2', 'HighMI_1-3', 'HighMI_1-4'])
+    df = dataset.CytokineDataset(files=datasets)
+    plot.plot_dataset(df, 'IL-17A')
+
+    # Normalize the dataset to be in the interval [-1, 1].
+    df.x_min, df.x_max = df.X.min(), df.X.max()
+    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
+
+    # Get the k-folds of the dataset.
+    train_per = 0.7
+    val_per = 0.15
+    n_splits = 6
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=torch.seed() >> 32)
+
+    # Train the model.
     train_model(df, kf, pred='series')
     train_model(df, kf, pred='point')
 
@@ -121,10 +135,10 @@ if __name__ == '__main__':
     train_model(df, kf, pred='series')
     train_model(df, kf, pred='point')
 
-    nn = torch.load('model/series/nn-0.001-all/eph-120.pth')
+    nn = torch.load('model/series/nn-0.0005-all/eph-80.pth')
     nn.eval()
     with torch.no_grad():
-        for n in [10, 21, 42, 66]:
+        for n in [10, 42, 66, 101, 123, 148, 200]:
             x, y, r = df[n]
             pred = nn(x)
             pred = torch.reshape(pred, (5, 52)).detach().numpy()
@@ -136,7 +150,7 @@ if __name__ == '__main__':
             plt.title(f'Target and Prediction ({n})')
             plt.show()
 
-    nn = torch.load('model/point/nn-0.001-all/eph-80.pth')
+    nn = torch.load('model/point/nn-0.0005-all/eph-80.pth')
     preds = model.evaluate(nn, data.DataLoader(df, batch_size=1, shuffle=True))
     plot.plot_pred_concentration(preds, df)
 

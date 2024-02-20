@@ -11,8 +11,8 @@ from torch.utils import data
 
 
 class CytokineDataset(data.Dataset):
-    def __init__(self, folder: list[str], cytokine: list[str] = 'all', antigens: dict = None,
-                 norm: str = None, res_tolerance: float = 0.5):
+    def __init__(self, folder: str = 'data/final', files: list[str] = None, cytokine: list[str] = 'all',
+                 antigens: dict = None, norm: str = None, res_tolerance: float = 0.5):
         if cytokine != 'all':
             self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
         else:
@@ -34,7 +34,6 @@ class CytokineDataset(data.Dataset):
                 'V4': 3,
                 'G4': 4,
                 'E1': 5,
-                # 'A2': 6,
             }
         else:
             self.antigens = antigens
@@ -51,8 +50,11 @@ class CytokineDataset(data.Dataset):
         }
 
         self.pkl_files = []
-        for name in folder:
-            self.pkl_files.extend([f for f in glob.glob(os.path.join('data/final', f'*{name}*.pkl'))])
+        if files is not None:
+            for name in files:
+                self.pkl_files.extend([f for f in glob.glob(os.path.join(folder, f'*{name}*.pkl'))])
+        else:
+            self.pkl_files = glob.glob(os.path.join(folder, '*'))
 
         assert norm is None or norm == 'min-max'
         self.norm = norm
@@ -62,6 +64,18 @@ class CytokineDataset(data.Dataset):
         self.logs = dict()
         self.smoothed = dict()
         self.splines = dict()
+
+        levels = set()
+        for k in self.dfs.keys():
+            levels = levels.union(self.dfs[k].index.names)
+
+        for k in self.dfs.keys():
+            if len(new_levels := levels.difference(self.dfs[k].index.names)) != 0:
+                idx = self.dfs[k].index.to_frame()
+                for level in new_levels:
+                    idx.insert(0, level, '')
+                self.dfs[k].index = pd.MultiIndex.from_frame(idx)
+
         for k in self.dfs.keys():
             # this seems unnecessary but is done in the paper for some reason
             self.dfs[k] = self.dfs[k].stack().unstack('Cytokine')
@@ -86,10 +100,19 @@ class CytokineDataset(data.Dataset):
             )
 
             # normalize and log the dataset
-            lod = pd.read_json([f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))][0])
+            if len(lod := [f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))]) != 0:
+                lod = pd.read_json(lod[0])
+            else:
+                lod = None
+
             self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
-                self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] -= np.log10(lod.loc[cytokine].iloc[2])
+                idx = self.logs[k].index.get_level_values("Cytokine") == cytokine
+                if lod is not None:
+                    self.logs[k].loc[idx] -= np.log10(lod.loc[cytokine].iloc[2])
+                else:
+                    self.logs[k].loc[idx] -= np.log10(self.dfs[k].loc[idx].values.min())
+
                 if norm == 'min-max':
                     self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] /= (
                             np.log10(df_max) - np.log10(lod.loc[cytokine].iloc[2])
@@ -110,7 +133,8 @@ class CytokineDataset(data.Dataset):
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
-        self.X = self.X.sort_index(level=['Dataset', 'TCellNumber', 'Peptide', 'Concentration', 'Cytokine'])
+        aux_levels = list(levels.difference({'Dataset', 'Peptide', 'Concentration', 'Cytokine'}))
+        self.X = self.X.sort_index(level=['Dataset',  *aux_levels, 'Peptide', 'Concentration', 'Cytokine'])
         for row in self.X.index:
             spline = self.splines[row[0]].loc[row[1: -1]][row[-1]]
             self.X.loc[row] = np.array([spline.integral(0, t) for t in self.X.columns])
@@ -143,8 +167,7 @@ class CytokineDataset(data.Dataset):
         ]
         r = r.droplevel('Dataset').droplevel('TCellNumber')
 
-        # Returns just the values at time 64.0 because those are the only ones we care about.
-        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 52].to_numpy()).float()
+        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 30].to_numpy()).float()
 
     @staticmethod
     def convert_unit(c: str) -> float:
@@ -164,18 +187,3 @@ class CytokineDataset(data.Dataset):
             amount = amount * 1e-6
 
         return np.log10(amount)
-
-
-def get_kfold_dataset(params, train_per: float = 0.7, val_per: float = 0.15, n_splits=6) -> tuple[CytokineDataset, KFold]:
-    assert np.less(train_per + val_per, 1.)
-
-    df = [f'PeptideComparison_{i}' for i in range(1, 10)] if params['df'] == 'all' \
-        else [f'PeptideComparison_{i}' for i in params["df"]]
-    df = CytokineDataset(df)
-
-    # Normalize the dataset to be in the interval [-1, 1].
-    df.x_min, df.x_max = df.X.min(), df.X.max()
-    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
-
-    # The number of folds is 6 by default because it evenly divides the length of the full dataset.
-    return df, KFold(n_splits=n_splits, shuffle=True, random_state=torch.seed() >> 32)

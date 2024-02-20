@@ -25,7 +25,7 @@ class CytokineModel(nn.Module):
 
         self.fc2a = nn.Linear(2, h2)
         # The length of the time series to predict is hard-coded here.
-        self.fc2b = nn.Linear(h2, 5 if pred == 'point' else 5 * 52)
+        self.fc2b = nn.Linear(h2, 5 if pred == 'point' else 5 * 30)
 
         # GeLU
         self.ac1 = nn.Softplus()
