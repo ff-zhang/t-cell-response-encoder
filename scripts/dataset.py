@@ -60,7 +60,7 @@ class CytokineDataset(data.Dataset):
         self.norm = norm
         self.x_min, self.x_max = -np.inf, np.max
 
-        self.dfs = {n: pd.read_pickle(f) for n, f in zip(folder, self.pkl_files)}
+        self.dfs = {n: pd.read_pickle(f) for n, f in enumerate(self.pkl_files)}
         self.logs = dict()
         self.smoothed = dict()
         self.splines = dict()
