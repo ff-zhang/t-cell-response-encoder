@@ -6,13 +6,23 @@ import pandas as pd
 import scipy
 
 import torch
-from sklearn.model_selection import KFold
 from torch.utils import data
 
+TIME_SERIES_LENGTH = 64
 
 class CytokineDataset(data.Dataset):
     def __init__(self, folder: str = 'data/final', files: list[str] = None, cytokine: list[str] = 'all',
-                 antigens: dict = None, norm: str = None, res_tolerance: float = 0.5):
+                 antigens: dict = None, lod: bool = False, norm: bool = True, rtol: float = 0.5):
+        """
+        :param folder: root directory to search for dataset .pkl files
+        :param files: list of (substrings of) files names to load
+        :param cytokine: cytokines labels to include in the loaded dataset
+        :param antigens: antigen labels to include in the loaded dataset
+        :param lod: determines whether to normalize by the LoD or dataset minimum
+        :param norm: determines whether to normalize the dataset into the range [-1, 1] at the end
+        :param rtol: the fraction of the sum of squared residuals between raw and smoothed data used as a tolerance during spline fitting
+        """
+
         if cytokine != 'all':
             self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
         else:
@@ -56,10 +66,6 @@ class CytokineDataset(data.Dataset):
         else:
             self.pkl_files = glob.glob(os.path.join(folder, '*'))
 
-        assert norm is None or norm == 'min-max'
-        self.norm = norm
-        self.x_min, self.x_max = -np.inf, np.max
-
         self.dfs = {n: pd.read_pickle(f) for n, f in enumerate(self.pkl_files)}
         self.logs = dict()
         self.smoothed = dict()
@@ -86,9 +92,6 @@ class CytokineDataset(data.Dataset):
                         self.dfs[k].loc[tuple(list(df_zero.iloc[row, :].name) + [df_zero.columns[t]])] = np.nan
             self.dfs[k] = self.dfs[k].interpolate(method='linear').stack('Cytokine').unstack('Time')
 
-            # to be used later in the normalization process
-            df_max = self.dfs[k].values.max()
-
             # get valid antigens and cytokines
             self.dfs[k].query(
                 ' | '.join(f'(@self.dfs[@k].index.get_level_values("Peptide") == "{antigen}")' for antigen in self.antigens),
@@ -99,12 +102,12 @@ class CytokineDataset(data.Dataset):
                 engine='python', inplace=True
             )
 
-            # normalize and log the dataset
-            if len(lod := [f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))]) != 0:
+            if lod and len(lod := [f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))]) != 0:
                 lod = pd.read_json(lod[0])
             else:
                 lod = None
 
+            # log the dataset and normalize
             self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
                 idx = self.logs[k].index.get_level_values("Cytokine") == cytokine
@@ -112,11 +115,6 @@ class CytokineDataset(data.Dataset):
                     self.logs[k].loc[idx] -= np.log10(lod.loc[cytokine].iloc[2])
                 else:
                     self.logs[k].loc[idx] -= np.log10(self.dfs[k].loc[idx].values.min())
-
-                if norm == 'min-max':
-                    self.logs[k].loc[self.logs[k].index.get_level_values("Cytokine") == cytokine] /= (
-                            np.log10(df_max) - np.log10(lod.loc[cytokine].iloc[2])
-                    )
 
             self.smoothed[k] = self.logs[k].copy()
             self.smoothed[k].iloc[:, 1: -1] = self.smoothed[k].rolling(window=3, center=True, axis=1).mean().iloc[:, 1: -1]
@@ -129,7 +127,7 @@ class CytokineDataset(data.Dataset):
                 for row in self.splines[k].index:
                     y = self.smoothed[k].loc[tuple(list(row) + [cytokine])]
                     r = self.logs[k].loc[tuple(list(row) + [cytokine])]
-                    self.splines[k].loc[row, cytokine] = scipy.interpolate.UnivariateSpline(self.smoothed[k].columns, y, s=res_tolerance * np.sum((y - r) ** 2))
+                    self.splines[k].loc[row, cytokine] = scipy.interpolate.UnivariateSpline(self.smoothed[k].columns, y, s=rtol * np.sum((y - r) ** 2))
 
         self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
@@ -144,6 +142,11 @@ class CytokineDataset(data.Dataset):
             self.X.iloc[:, t] -= np.nansum(self.X.diff(axis=1)[self.X.diff(axis=1) < 0].loc[:, self.X.columns[: t+1]], axis=1)
         self.X[self.X <= 0.] = 0.
 
+        # Normalize the dataset to be in the interval [-1, 1].
+        if norm == 'min-max':
+            self.x_min, self.x_max = self.X.min(), self.X.max()
+            self.X = (self.X - self.x_min) / (self.x_max - self.x_min) * 2 - 1
+
     def __len__(self):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)
         return self.X.shape[0] // len(self.classes)
@@ -151,23 +154,24 @@ class CytokineDataset(data.Dataset):
     def __getitem__(self, idx: int, min_max: tuple[float, float] = None):
         idx = idx * len(self.classes)
 
-        dataset_name, tcell_count, antigen_name, concentration_name, _ = self.X.iloc[idx, :].name
+        dataset_name, act_type, tcell_count, antigen_name, conc_name, _ = self.X.iloc[idx, :].name
 
         antigen = self.antigens[antigen_name]
-        antigen_vec = self.ident_antigen[antigen] * self.convert_unit(concentration_name)
+        antigen_vec = self.ident_antigen[antigen] * self.convert_unit(conc_name)
 
         cytokine_measure = self.X.iloc[idx, :].to_numpy()
         cytokine_measure = torch.from_numpy(cytokine_measure)
 
         r = self.X.iloc[
-            (self.X.index.get_level_values('Peptide') == antigen_name) &
-            (self.X.index.get_level_values('Concentration') == concentration_name) &
             (self.X.index.get_level_values('Dataset') == dataset_name) &
-            (self.X.index.get_level_values('TCellNumber') == tcell_count)
+            (self.X.index.get_level_values('ActivationType') == act_type) &
+            (self.X.index.get_level_values('TCellNumber') == tcell_count) &
+            (self.X.index.get_level_values('Peptide') == antigen_name) &
+            (self.X.index.get_level_values('Concentration') == conc_name)
         ]
         r = r.droplevel('Dataset').droplevel('TCellNumber')
 
-        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : 30].to_numpy()).float()
+        return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : TIME_SERIES_LENGTH].to_numpy()).float()
 
     @staticmethod
     def convert_unit(c: str) -> float:

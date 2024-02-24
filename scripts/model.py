@@ -7,6 +7,9 @@ import torch
 from torch import nn
 from torch.utils import data
 
+TIME_SERIES_LENGTH = 64
+POINT_INDEX = -16
+
 
 class CytokineModel(nn.Module):
     """
@@ -25,7 +28,7 @@ class CytokineModel(nn.Module):
 
         self.fc2a = nn.Linear(2, h2)
         # The length of the time series to predict is hard-coded here.
-        self.fc2b = nn.Linear(h2, 5 if pred == 'point' else 5 * 30)
+        self.fc2b = nn.Linear(h2, 5 if pred == 'point' else 5 * TIME_SERIES_LENGTH)
 
         # GeLU
         self.ac1 = nn.Softplus()
@@ -56,7 +59,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
         # Note that only the entry at 64.0 hours is given here.
         for x, _, r in train_loader:
             if model.pred == 'point':
-                r = r[:, :, -1]
+                r = r[:, :, POINT_INDEX]
             elif model.pred == 'series':
                 r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
 
@@ -72,7 +75,7 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
         with torch.no_grad():
             for x, _, r in validation_loader:
                 if model.pred == 'point':
-                    r = r[:, :, -1]
+                    r = r[:, :, POINT_INDEX]
                 elif model.pred == 'series':
                     r = torch.reshape(r, (-1, r.shape[1] * r.shape[2]))
 

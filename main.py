@@ -21,13 +21,13 @@ LEVEL_VALUES = [
     # Features
     ['concentration', 'derivative', 'integral']
 ]
-
 params = {
     'max_epochs': 150,
     'df': 'all',
     'save': True,
     'learning_rate': [0.005, 0.001, 0.0005, 0.0001],
 }
+TIME_SERIES_LENGTH = 64
 
 
 def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -94,10 +94,6 @@ if __name__ == '__main__':
     df = dataset.CytokineDataset(files=datasets)
     plot.plot_dataset(df, 'IL-17A')
 
-    # Normalize the dataset to be in the interval [-1, 1].
-    df.x_min, df.x_max = df.X.min(), df.X.max()
-    df.X = (df.X - df.x_min) / (df.x_max - df.x_min) * 2 - 1
-
     # Get the k-folds of the dataset.
     train_per = 0.7
     val_per = 0.15
@@ -114,7 +110,7 @@ if __name__ == '__main__':
         for n in [10, 42, 66, 101, 123, 148, 200]:
             x, y, r = df[n]
             pred = nn(x)
-            pred = torch.reshape(pred, (5, 30)).detach().numpy()
+            pred = torch.reshape(pred, (5, TIME_SERIES_LENGTH)).detach().numpy()
             r = r.detach().numpy()
             for i, c in enumerate(['blue', 'green', 'red', 'orange', 'purple']):
                 plt.plot(pred.T[:, i], color=c)

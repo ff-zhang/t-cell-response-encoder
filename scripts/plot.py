@@ -26,6 +26,7 @@ CONCENTRATION_LINE = {
     '1nM': '--',
     '1uM': '-',
 }
+POINT_INDEX = -16
 
 
 def plot_spline_process_steps(chosen, df_raw, df_log, df_smooth, df_spline):
@@ -178,15 +179,11 @@ def plot_loss(losses, title):
 
 
 def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> None:
-    # Create a dictionary to store values for each category
-    cytokine_pred = {antigen: [] for antigen in ANTIGENS}
-
     df_plots = []
     for (x, _, r), pred in zip(list(ds[i] for i in range(len(ds))), preds):
-        r = r[:, -1]
+        r = r[:, POINT_INDEX]
         antigen = np.argwhere(x.numpy() != 0.)[0][0]
         concentration = x.numpy()[antigen]
-        cytokine_pred[ANTIGENS[antigen]].append([concentration, r.numpy(), pred])
 
         # We only consider the first cytokine output here (IFNg) for plotting.
         df_plots.append([ANTIGENS[antigen], concentration, pred[0], r.numpy()[0]])
