@@ -37,15 +37,8 @@ def MAPE_loss(input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.mean(torch.abs((target - input) / target))
 
 
-def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series', filename: str = None,
-                criterion: str = None, write: bool = False):
-    if write:
-        if filename is None:
-            raise FileNotFoundError
-
-        f = open(filename, 'w')
-        f.close()
-
+def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series',
+                criterion: str = None, ckpt_dir: str = 'model'):
     print(f'Training on dataset {params["df"]} with {len(df)} points ({torch.seed()})\n')
 
     losses = {}
@@ -59,14 +52,15 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series',
             train_loader = data.DataLoader(data.Subset(df, train_index), batch_size=4, shuffle=True)
             test_loader = data.DataLoader(data.Subset(df, test_index), batch_size=4, shuffle=True)
 
-            nn = model.CytokineModel(h1=32, h2=6, pred=pred)
+            nn = model.CytokineModel(input=len(df.antigens), h1=16, h2=4, pred=pred)
             if criterion == 'MAPE':
                 criterion = MAPE_loss
             else:
                 criterion = torch.nn.MSELoss('mean')
             optimizer = torch.optim.Adam(nn.parameters(), lr)
 
-            losses[lr] = model.train(nn, train_loader, test_loader, criterion, optimizer, **params)
+            losses[lr] = model.train(nn, train_loader, test_loader, criterion, optimizer,
+                                     ckpt_dir=ckpt_dir, **params)
 
         plot.plot_loss(losses, (params['df'], i + 1))
 

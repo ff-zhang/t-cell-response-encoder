@@ -46,17 +46,17 @@ class CytokineModel(nn.Module):
 
 
 def train(model: nn.Module, train_loader, validation_loader, criterion, optimizer, **kwargs):
-    train_history, val_history = np.zeros(kwargs['max_epochs']), np.zeros(kwargs['max_epochs'])
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
+
+    train_history, val_history = np.zeros(kwargs['max_epochs']), np.zeros(kwargs['max_epochs'])
 
     s = time.time()
     model.train()
     for epoch in tqdm(range(kwargs['max_epochs'])):
         train_loss, val_loss = 0, 0
 
-        # Note that only the entry at 64.0 hours is given here.
         for x, _, r in train_loader:
             if model.pred == 'point':
                 r = r[:, :, POINT_INDEX]
@@ -87,10 +87,15 @@ def train(model: nn.Module, train_loader, validation_loader, criterion, optimize
         val_history[epoch] = val_loss / len(validation_loader.dataset)
 
         if kwargs['save'] and not (epoch + 1) % 5:
-            # Only tested when using the Adam optimizer.
-            path = Path(f'model/{model.pred}/nn-{optimizer.param_groups[0]["lr"]}-{kwargs["df"]}')
+            assert 'ckpt_dir' in kwargs
+
+            # Note this is only tested with the Adam optimizer.
+            path = Path(
+                f'{kwargs["ckpt_dir"]}/{model.pred}/nn-{optimizer.param_groups[0]["lr"]}-{kwargs["df"]}'
+            )
             if not path.exists():
-                Path.mkdir(path, exist_ok=True)
+                Path.mkdir(path, parents=True, exist_ok=True)
+
             torch.save(model, path / f'eph-{epoch + 1}.pth')
 
     e = time.time()
