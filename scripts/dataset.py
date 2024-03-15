@@ -10,30 +10,34 @@ from torch.utils import data
 
 TIME_SERIES_LENGTH = 64
 
+DEFAULT_ANTIGENS = ['N4', 'Q4', 'T4', 'V4', 'G4', 'E1']
+DEFAULT_CYTOKINES = ['IFNg', 'IL-17A', 'IL-2', 'IL-6', 'TNFa']
+DEFAULT_CONCENTRATIONS = ['100pM', '10pM', '300nM', '100nM', '30nM', '10nM', '3nM', '1nM', '1uM']
+
 
 class CytokineDataset(data.Dataset):
-    def __init__(self, folder: str = 'data/final', files: list[str] = None, cytokine: list[str] = 'all',
-                 antigens: dict = None, lod: bool = False, norm: bool = True, rtol: float = 0.5,
-                 exclude: dict = None):
+    def __init__(self, folder: str = 'data/final', files: list[str] = None, cytokines: list = None,
+                 antigens: list = None, concentrations: list = None, exclude: dict = None,
+                 lod: bool = False, norm: bool = True, rtol: float = 0.5):
         """
         :param folder: root directory to search for dataset .pkl files
         :param files: list of (substrings of) files names to load
         :param cytokine: cytokines labels to include in the loaded dataset
         :param antigens: antigen labels to include in the loaded dataset
+        :param exclude: labels to be excluded from the loaded dataset
         :param lod: determines whether to normalize by the LoD or dataset minimum
         :param norm: determines whether to normalize the dataset into the range [-1, 1] at the end
         :param rtol: the fraction of the sum of squared residuals between raw and smoothed data used as a tolerance during spline fitting
         """
 
-        self._init_params(folder, files, cytokine, antigens)
-
+        self._init_params(folder, files, cytokines, antigens, concentrations, exclude)
         self._process_datasets(lod, rtol)
 
         # Combines the individual dataframes into one.
         self.X = pd.concat(self.dfs, names=['Dataset'])
         self.X = self.X.sort_index(axis=1)
         aux_levels = list(self.levels.difference({'Dataset', 'Peptide', 'Concentration', 'Cytokine'}))
-        self.X = self.X.sort_index(level=['Dataset',  *aux_levels, 'Peptide', 'Concentration', 'Cytokine'])
+        self.X = self.X.sort_index(level=['Dataset', *aux_levels, 'Peptide', 'Concentration', 'Cytokine'])
         for row in self.X.index:
             spline = self.splines[row[0]].loc[row[1: -1]][row[-1]]
             self.X.loc[row] = np.array([spline.integral(0, t) for t in self.X.columns])
@@ -48,49 +52,36 @@ class CytokineDataset(data.Dataset):
             self.x_min, self.x_max = self.X.min(), self.X.max()
             self.X = (self.X - self.x_min) / (self.x_max - self.x_min) * 2 - 1
 
-        if exclude is not None:
-            assert exclude.keys() in ['Peptide', 'Concentration', 'Cytokine']
-            for k, l in exclude.items():
-                for v in l:
-                    self.X = self.X[self.X.index.get_level_values(k) != v]
+    def _init_params(self, folder: str = 'data/final', files: list[str] = None, cytokines: list = None,
+                     antigens: dict = None, concentrations: list = None, exclude: dict = None):
+        # Checks that either the elements of the labels and targets are specified, or the elements
+        # to be excluded are specified, not both.
+        assert cytokines is None or exclude is None
+        assert antigens is None or exclude is None
 
-    def _init_params(self, folder: str = 'data/final', files: list[str] = None,
-                     cytokine: list[str] = 'all', antigens: dict = None):
-        if cytokine != 'all':
-            self.classes = {cyto: i for i, cyto in enumerate(cytokine)}
-        else:
-            self.classes = {
-                'IFNg': 0,
-                'IL-17A': 1,
-                'IL-2': 2,
-                'IL-6': 3,
-                'TNFa': 4,
-            }
+        self.classes = cytokines if cytokines is not None else DEFAULT_CYTOKINES
+        self.antigens = antigens if antigens is not None else DEFAULT_ANTIGENS
+        self.concs = concentrations if concentrations is not None else DEFAULT_CONCENTRATIONS
+
+        # Removes unwanted values from their respective class attributes.
+        # These will be used to filter out data points with the unwanted values latter.
+        if exclude is not None:
+            attr_dict = {'Cytokine': self.classes, 'Peptide': self.antigens, 'Concentration': self.concs}
+            assert exclude.keys() <= attr_dict.keys()
+            for k, v in exclude.items():
+                if type(v) is list or type(v) is tuple:
+                    for w in v:
+                        attr_dict[k].remove(w)
+                elif type(v) is str:
+                    attr_dict[k].remove(v)
+                else:
+                    raise TypeError
+
+        self.classes = {k: v for v, k in enumerate(self.classes)}
+        self.antigens = {k: v for v, k in enumerate(self.antigens)}
 
         self.ident = torch.eye(len(self.classes))
-
-        if antigens is None:
-            self.antigens = {
-                'N4': 0,
-                'Q4': 1,
-                'T4': 2,
-                'V4': 3,
-                'G4': 4,
-                'E1': 5,
-            }
-        else:
-            self.antigens = antigens
         self.ident_antigen = torch.eye(len(self.antigens))
-
-        self.concentrations = {
-            '1uM': 1e-6,
-            '100pM': 1e-7,
-            '10pM': 1e-8,
-            '1pM': 1e-9,
-            '100nM': 1e-10,
-            '10nM': 1e-11,
-            '1nM': 1e-12,
-        }
 
         self.pkl_files = []
         if files is not None:
@@ -98,17 +89,20 @@ class CytokineDataset(data.Dataset):
                 self.pkl_files.extend([f for f in glob.glob(os.path.join(folder, f'*{name}*.pkl'))])
         else:
             self.pkl_files = glob.glob(os.path.join(folder, '*'))
-
         self.dfs = {n: pd.read_pickle(f) for n, f in enumerate(self.pkl_files)}
+
+        # Sets up data structures to hold intermediate data sets in the processing pipeline.
         self.logs = dict()
         self.smoothed = dict()
         self.splines = dict()
 
+        # Gets all index levels (i.e. columns) across the different data frames.
         self.levels = set()
         for k in self.dfs.keys():
             self.levels = self.levels.union(self.dfs[k].index.names)
 
     def _process_datasets(self, lod, rtol):
+        # Inserts placeholder index levels to ensure easy data frame concatenation later.
         for k in self.dfs.keys():
             if len(new_levels := self.levels.difference(self.dfs[k].index.names)) != 0:
                 idx = self.dfs[k].index.to_frame()
@@ -117,7 +111,9 @@ class CytokineDataset(data.Dataset):
                 self.dfs[k].index = pd.MultiIndex.from_frame(idx)
 
         for k in self.dfs.keys():
-            # this seems unnecessary but is done in the paper for some reason
+            print(f'Processing file: {self.pkl_files[k]}')
+
+            # This step seems unnecessary but is done in the paper the data is taken from.
             self.dfs[k] = self.dfs[k].stack().unstack('Cytokine')
             df_zero = (np.sum(self.dfs[k] == self.dfs[k].min(), axis=1) == len(
                 self.dfs[k].columns)).unstack('Time')
@@ -128,7 +124,8 @@ class CytokineDataset(data.Dataset):
                             tuple(list(df_zero.iloc[row, :].name) + [df_zero.columns[t]])] = np.nan
             self.dfs[k] = self.dfs[k].interpolate(method='linear').stack('Cytokine').unstack('Time')
 
-            # get valid antigens and cytokines
+            # Gets data points with valid antigens, cytokines, and concentrations using our
+            # initialized class attributes.
             self.dfs[k].query(
                 ' | '.join(
                     f'(@self.dfs[@k].index.get_level_values("Peptide") == "{antigen}")' for antigen
@@ -141,14 +138,25 @@ class CytokineDataset(data.Dataset):
                     self.classes),
                 engine='python', inplace=True
             )
+            self.dfs[k].query(
+                ' | '.join(
+                    f'(@self.dfs[@k].index.get_level_values("Concentration") == "{conc}")' for conc
+                    in self.concs),
+                engine='python', inplace=True
+            )
 
+            # Skips the rest of the processing if there are no valid points in the data frame.
+            if len(self.dfs[k]) == 0:
+                continue
+
+            # Normalizes the lower limit of the points.
             if lod and len(
                     lod := [f for f in glob.glob(os.path.join('data/lod', f'*{k}*.json'))]) != 0:
                 lod = pd.read_json(lod[0])
             else:
                 lod = None
 
-            # log the dataset and normalize
+            # Take the log of the current data frame.
             self.logs[k] = np.log10(self.dfs[k]).copy()
             for cytokine in self.classes.keys():
                 idx = self.logs[k].index.get_level_values("Cytokine") == cytokine
@@ -157,21 +165,26 @@ class CytokineDataset(data.Dataset):
                 else:
                     self.logs[k].loc[idx] -= np.log10(self.dfs[k].loc[idx].values.min())
 
+            # Take the weighted rolling average of points to smooth the curves.
             self.smoothed[k] = self.logs[k].copy()
             self.smoothed[k].iloc[:, 1: -1] = self.smoothed[k].rolling(window=3, center=True,
                                                                        axis=1).mean().iloc[:, 1: -1]
 
+            # Reinserts the initial time step.
             self.logs[k].insert(0, 0., 0.)
             self.smoothed[k].insert(0, 0., 0.)
 
+            # Computes a spline for each data point in the data frame of smoothed curves.
             self.splines[k] = pd.DataFrame(None, index=self.dfs[k].unstack('Cytokine').index,
                                            columns=list(self.classes.keys()), dtype=object)
             for cytokine in self.splines[k].columns:
                 for row in self.splines[k].index:
                     y = self.smoothed[k].loc[tuple(list(row) + [cytokine])]
                     r = self.logs[k].loc[tuple(list(row) + [cytokine])]
+
                     self.splines[k].loc[row, cytokine] = scipy.interpolate.UnivariateSpline(
-                        self.smoothed[k].columns, y, s=rtol * np.sum((y - r) ** 2))
+                        self.smoothed[k].columns, y, s=rtol * np.sum((y - r) ** 2)
+                    )
 
     def __len__(self):
         assert self.X.shape[0] / len(self.classes) == self.X.shape[0] // len(self.classes)
@@ -183,7 +196,8 @@ class CytokineDataset(data.Dataset):
         dataset_name, act_type, tcell_count, antigen_name, conc_name, _ = self.X.iloc[idx, :].name
 
         antigen = self.antigens[antigen_name]
-        antigen_vec = self.ident_antigen[antigen] * self.convert_unit(conc_name)
+        normalized_conc = (self.convert_unit(conc_name) + 12) / (4 - 12)
+        antigen_vec = self.ident_antigen[antigen] * normalized_conc
 
         cytokine_measure = self.X.iloc[idx, :].to_numpy()
         cytokine_measure = torch.from_numpy(cytokine_measure)
