@@ -205,6 +205,8 @@ def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> Non
     try:
         fig, axes = plt.subplots(nrows=1, ncols=len(grouped_df['Antigen Name'].unique()),
                                  figsize=(15, 3))
+        if type(axes) is not list:
+            axes = [axes]
 
         for (antigen, group), ax in zip(grouped_df.groupby('Antigen Name'), axes):
             color = ANTIGEN_COLOUR.get(antigen, 'black')
@@ -220,7 +222,6 @@ def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> Non
             ax.scatter(group['Input Concentration'], group['Mean Predicted Concentration'], color=color)
 
             ax.set_xlabel('Concentration')
-            ax.set_xticks([-11., -10., -9., -8., -7., -6.])
             ax.set_ylabel('[Cytokine 1] Raw & Predicted Avg')
             ax.legend()
 

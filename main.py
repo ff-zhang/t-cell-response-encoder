@@ -64,11 +64,6 @@ def train_model(df: dataset.CytokineDataset, kfold: KFold, pred: str = 'series',
 
         plot.plot_loss(losses, (params['df'], i + 1))
 
-    if write:
-        with open(filename, 'a') as f:
-            f.write(', '.join(str(w) for w in nn.fc1.weight.detach().numpy().flatten()) + ', ')
-            f.write(', '.join(str(w) for w in nn.fc2.weight.detach().numpy().flatten()) + '\n')
-
 
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
@@ -85,7 +80,7 @@ if __name__ == '__main__':
     datasets = [f'PeptideComparison_{i}' for i in range(1, 10)]
     datasets.extend(['TCellNumber_1', 'TCellNumber_3', 'Activation_1', 'Activation_3',
                      'HighMI_1-1', 'HighMI_1-2', 'HighMI_1-3', 'HighMI_1-4'])
-    df = dataset.CytokineDataset(files=datasets)
+    df = dataset.CytokineDataset(files=datasets, antigens=['V4'])
     plot.plot_dataset(df, 'IL-17A')
 
     # Get the k-folds of the dataset.
