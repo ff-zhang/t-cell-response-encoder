@@ -205,7 +205,7 @@ def plot_pred_concentration(preds: np.array, ds: dataset.CytokineDataset) -> Non
     try:
         fig, axes = plt.subplots(nrows=1, ncols=len(grouped_df['Antigen Name'].unique()),
                                  figsize=(15, 3))
-        if type(axes) is not list:
+        if type(axes) not in [list, np.ndarray]:
             axes = [axes]
 
         for (antigen, group), ax in zip(grouped_df.groupby('Antigen Name'), axes):

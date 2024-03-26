@@ -1,5 +1,7 @@
 import os, re
 import glob
+from itertools import product
+
 
 import numpy as np
 import pandas as pd
@@ -18,7 +20,7 @@ DEFAULT_CONCENTRATIONS = ['100pM', '10pM', '300nM', '100nM', '30nM', '10nM', '3n
 class CytokineDataset(data.Dataset):
     def __init__(self, folder: str = 'data/final', files: list[str] = None, cytokines: list = None,
                  antigens: list = None, concentrations: list = None, exclude: dict = None,
-                 lod: bool = False, norm: bool = True, rtol: float = 0.5):
+                 lod: bool = False, cutoff: int = 1, norm: bool = True, rtol: float = 0.5):
         """
         :param folder: root directory to search for dataset .pkl files
         :param files: list of (substrings of) files names to load
@@ -26,6 +28,7 @@ class CytokineDataset(data.Dataset):
         :param antigens: antigen labels to include in the loaded dataset
         :param exclude: labels to be excluded from the loaded dataset
         :param lod: determines whether to normalize by the LoD or dataset minimum
+        :param cutoff: the number of samples required for (antigen, concentration) pair to be included
         :param norm: determines whether to normalize the dataset into the range [-1, 1] at the end
         :param rtol: the fraction of the sum of squared residuals between raw and smoothed data used as a tolerance during spline fitting
         """
@@ -38,6 +41,15 @@ class CytokineDataset(data.Dataset):
         self.X = self.X.sort_index(axis=1)
         aux_levels = list(self.levels.difference({'Dataset', 'Peptide', 'Concentration', 'Cytokine'}))
         self.X = self.X.sort_index(level=['Dataset', *aux_levels, 'Peptide', 'Concentration', 'Cytokine'])
+
+        if cutoff != 0:
+            for antigen, conc in product(self.antigens, self.concs):
+                Xs = ((self.X.index.get_level_values('Peptide') == antigen) &
+                      (self.X.index.get_level_values('Concentration') == conc))
+                if np.sum(Xs) <= len(self.classes) * cutoff:
+                    self.X = self.X.iloc[~Xs]
+
+        # Integrate each over each spline.
         for row in self.X.index:
             spline = self.splines[row[0]].loc[row[1: -1]][row[-1]]
             self.X.loc[row] = np.array([spline.integral(0, t) for t in self.X.columns])
@@ -202,13 +214,11 @@ class CytokineDataset(data.Dataset):
         cytokine_measure = self.X.iloc[idx, :].to_numpy()
         cytokine_measure = torch.from_numpy(cytokine_measure)
 
-        r = self.X.iloc[
-            (self.X.index.get_level_values('Dataset') == dataset_name) &
-            (self.X.index.get_level_values('ActivationType') == act_type) &
-            (self.X.index.get_level_values('TCellNumber') == tcell_count) &
-            (self.X.index.get_level_values('Peptide') == antigen_name) &
-            (self.X.index.get_level_values('Concentration') == conc_name)
-        ]
+        r = self.X.iloc[(self.X.index.get_level_values('Dataset') == dataset_name) &
+                        (self.X.index.get_level_values('ActivationType') == act_type) &
+                        (self.X.index.get_level_values('TCellNumber') == tcell_count) &
+                        (self.X.index.get_level_values('Peptide') == antigen_name) &
+                        (self.X.index.get_level_values('Concentration') == conc_name)]
         r = r.droplevel('Dataset').droplevel('TCellNumber')
 
         return antigen_vec.float(), cytokine_measure.float(), torch.tensor(r.iloc[:, : TIME_SERIES_LENGTH].to_numpy()).float()
